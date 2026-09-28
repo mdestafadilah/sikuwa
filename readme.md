@@ -718,6 +718,7 @@ yang sudah teruji.
 ## Rencana Pengembangan
 
 - [ ] Menambahkan Gateway [Baileys API](https://github.com/rsuppersahabatan/baileys-api)
+- [ ] Menambahkan Gateway [Whatsmeow Node](https://github.com/nicastelo/whatsmeow-node)
 
 ## Kredit
 
