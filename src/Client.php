@@ -14,6 +14,7 @@ use Sikuwa\Whatsapp\Providers\ApiMe\ApiMe;
 use Sikuwa\Whatsapp\Providers\EvolutionAPI\EvolutionAPI;
 use Sikuwa\Whatsapp\Providers\Fonnte\Fonnte;
 use Sikuwa\Whatsapp\Providers\OpenWA\OpenWA;
+use Sikuwa\Whatsapp\Providers\Waxum\Waxum;
 use Sikuwa\Whatsapp\Providers\Wuzapi\Wuzapi;
 use Sikuwa\Whatsapp\Providers\Wwebjs\Wwebjs;
 
@@ -59,6 +60,7 @@ final class Client
         'EvolutionAPI' => EvolutionAPI::class,
         'Wuzapi' => Wuzapi::class,
         'Wwebjs' => Wwebjs::class,
+        'Waxum' => Waxum::class,
     ];
 
     private Config $config;

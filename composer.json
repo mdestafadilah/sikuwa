@@ -1,6 +1,6 @@
 {
     "name": "mdestafadilah/sikuwa",
-    "description": "SDK PHP dengan satu antarmuka untuk banyak gateway WhatsApp unofficial: Fonnte, OpenWA, ApiMe, Evolution API, Wuzapi, dan Wwebjs.",
+    "description": "SDK PHP dengan satu antarmuka untuk banyak gateway WhatsApp unofficial: Fonnte, OpenWA, ApiMe, Evolution API, Wuzapi, Wwebjs, dan Waxum.",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -13,7 +13,8 @@
         "apime",
         "evolution-api",
         "wuzapi",
-        "wwebjs"
+        "wwebjs",
+        "waxum"
     ],
     "authors": [
         {

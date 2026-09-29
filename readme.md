@@ -21,6 +21,7 @@ membutuhkan PHP 8.1+.
 | Evolution API | Self-hosted | Node.js / Baileys | <https://github.com/evolution-foundation/evolution-api> |
 | Wuzapi | Self-hosted | Go / WhatsMeow | <https://github.com/asternic/wuzapi> |
 | Wwebjs | Self-hosted | Node.js / whatsapp-web.js | <https://github.com/avoylenko/wwebjs-api> |
+| Waxum | Self-hosted | Rust / whatsapp-rust | <https://github.com/imtaqin/waxum> |
 
 ## Instalasi
 
@@ -161,8 +162,9 @@ Tiap gateway menempuh jalur yang berbeda, dan itu memang sifat gateway-nya:
 | Evolution API | `POST /message/sendMedia/{instance}` | sama, `mediatype=document` | JSON, base64 telanjang atau URL |
 | Wuzapi | `POST /chat/send/image` | `POST /chat/send/document` | JSON, data URI (wajib) |
 | Wwebjs | `POST /client/sendMessage/{id}` | sama, `contentType=MessageMedia` | JSON, base64 telanjang — atau `MessageMediaFromURL` bila sumbernya URL |
+| Waxum | `POST /api/v1/sessions/{id}/messages/image` | `…/messages/document` | JSON, `{data, mimetype}` — atau `{url}` bila sumbernya URL |
 
-Lima hal yang mudah menjebak, dan sudah ditangani SDK:
+Enam hal yang mudah menjebak, dan sudah ditangani SDK:
 
 - **ApiMe dan Wuzapi hanya menerima isi berkasnya**, bukan URL — keduanya tidak
   mengunduh apa pun sendiri. Menyerahkan URL ke sana melempar
@@ -173,6 +175,10 @@ Lima hal yang mudah menjebak, dan sudah ditangani SDK:
 - **Wuzapi meminta dokumen sebagai `octet-stream`**, apa pun jenis berkas
   aslinya. Itu bentuk yang diminta dokumentasinya, jadi jenis berkasnya tidak
   diteruskan ke sana.
+- **Waxum memisahkan isi dari jenisnya.** Base64 dikirim sebagai
+  `{data, mimetype}`, bukan data URI — dan `mimetype` wajib ikut, karena tanpa
+  itu waxum menolak medianya. URL publik diteruskan sebagai `{url}`; waxum
+  mengunduhnya sendiri lewat pemeriksa SSRF-nya.
 - **Fonnte baru bisa mengirim media pada paket berbayar**
   (super/advanced/ultra). Penolakannya datang sebagai `reason` biasa, jadi
   pesannya muncul apa adanya di log.
@@ -219,8 +225,9 @@ menolaknya lebih dulu dengan `ConfigurationException`.
 | Evolution API | `POST /chat/sendPresence/{instance}` | `composing` \| `recording` \| `paused` | dipakai, satuan milidetik |
 | Wuzapi | `POST /chat/presence` | `composing` + `Media: audio` \| `paused` | diabaikan |
 | Wwebjs | `POST /chat/sendStateTyping` · `…/sendStateRecording` · `…/clearState` | endpoint berbeda per keadaan | diabaikan; indikatornya bertahan ~25 detik di server |
+| Waxum | `POST /api/v1/sessions/{id}/chatstate/send` | `composing` \| `recording` \| `paused` | diabaikan |
 
-Empat hal yang mudah menjebak, dan sudah ditangani SDK:
+Lima hal yang mudah menjebak, dan sudah ditangani SDK:
 
 - **Evolution API ikut menahan pemanggil.** Servernya yang mengirim
   `composing`, menunggu `delay`, lalu mengirim `paused` — jadi panggilan ini
@@ -237,6 +244,9 @@ Empat hal yang mudah menjebak, dan sudah ditangani SDK:
 - **Wwebjs memakai endpoint berbeda untuk tiap keadaan**, bukan satu endpoint
   dengan kolom status. Karena tidak ada kolom durasi, `duration` di sana hanya
   menentukan berapa lama SDK menunggu sebelum pesannya dikirim.
+- **Waxum memakai endpoint yang sama untuk semua keadaan**, dengan kolom
+  `state` — kosakatanya kebetulan sama dengan kosakata baku SDK ini, jadi tidak
+  ada penerjemahan kata yang perlu dilakukan.
 
 ### Jeda antar pesan (pacing)
 
@@ -364,7 +374,7 @@ gateway-nya:
 | Gateway | Yang terjadi |
 | --- | --- |
 | Evolution API | Servernya sudah menunggu dan menghapus indikatornya sendiri, jadi SDK **tidak** menunggu lagi — kalau tidak, pemanggil menunggu dua kali |
-| ApiMe, Wuzapi, OpenWA, Fonnte, Wwebjs | Indikator hanya menyimpan status, jadi SDK yang menghabiskan durasinya |
+| ApiMe, Wuzapi, OpenWA, Fonnte, Wwebjs, Waxum | Indikator hanya menyimpan status, jadi SDK yang menghabiskan durasinya |
 
 Tiga hal yang mudah menjebak, dan sudah ditangani SDK:
 
@@ -373,8 +383,8 @@ Tiga hal yang mudah menjebak, dan sudah ditangani SDK:
   hanya indikator untuk **tujuan pesan pertama**. Memunculkan untuk semua tujuan
   sekaligus justru membuat penerima terakhir melihat "sedang mengetik" lalu diam
   lama sebelum pesannya datang — lebih buruk daripada tanpa indikator. ApiMe,
-  Evolution API, wuzapi, dan Wwebjs mengirim satu per satu, jadi tiap pesan
-  dapat indikatornya sendiri.
+  Evolution API, wuzapi, Wwebjs, dan Waxum mengirim satu per satu, jadi tiap
+  pesan dapat indikatornya sendiri.
 - **Berkas tidak didahului indikator.** `sendImage()` dan `sendFile()` tidak
   melewati indikator "sedang mengetik" — yang dikirim bukan ketikan, dan
   mengatakannya akan berbohong. Pakai `sendTyping()` sendiri kalau memang mau.
@@ -499,6 +509,7 @@ bukan sebagai exception:
 | Wuzapi | error `already logged in` |
 | OpenWA | HTTP 400 — sebabnya bercampur dengan sesi yang belum `qr_ready`, jadi tetap dilempar |
 | Wwebjs | JSON `qr code not ready or already scanned` — dibedakan dengan membaca status sesi |
+| Waxum | `{"qr_codes":[],"status":"logged_in"}` — dibedakan dari isi `qr_codes` dan status sesinya |
 
 Karena itu `showQr()` aman dipanggil tanpa memeriksa `checkSession()` lebih
 dulu:
@@ -534,6 +545,13 @@ Catatan per gateway:
   saat QR-nya tidak ada, dan sebabnya bisa dua hal sekaligus — session belum
   selesai dimuat, atau QR-nya sudah dipindai. Yang kedua dibedakan dengan
   menanyakan `GET /session/status/{id}` sekali.
+- **Waxum** — balasan `GET /api/v1/sessions/{id}/qr` memuat **daftar** kode di
+  `qr_codes`, bukan satu kode; yang dipakai SDK adalah elemen pertamanya. Isinya
+  string mentah yang harus digambar jadi QR oleh pemanggil, bukan base64, jadi
+  `$qr` sengaja dibiarkan kosong kecuali kalau payload-nya memang sudah berupa
+  gambar — memasangnya sebagai data URI PNG akan menghasilkan `<img>` yang
+  rusak. Bentuk mentahnya tetap bisa dibaca lewat `$session->raw`. Sesi yang
+  runtime-nya belum hidup ditolak HTTP 503, dan itu tetap dilempar.
 
 | Gateway | Membuat sesi | Memeriksa sesi | QR sesi |
 | --- | --- | --- | --- |
@@ -543,12 +561,14 @@ Catatan per gateway:
 | Wuzapi | `POST /session/connect` — `subscribe`, `immediate` | `GET /session/status` | `GET /session/qr` |
 | Fonnte | `POST /add-device` — `name`, `device`, `autoread` | `POST /get-devices` | `POST /qr` |
 | Wwebjs | `POST /session/start/{id}` — `id`, `webhookUrl` | `GET /session/status/{id}` | `GET /session/qr/{id}/image` |
+| Waxum | `POST /api/v1/sessions` — `id`, `name`, `webhook`, `device` | `GET /api/v1/sessions/{id}/status` | `GET /api/v1/sessions/{id}/qr` |
 
 Catatan:
 
 - **Sesi baru biasanya belum tersambung.** OpenWA membuatnya `INITIALIZING`,
-  Evolution API `created`, Fonnte `created`, Wwebjs `starting`. Ambil QR-nya
-  dengan `showQr()`, lalu pantau dengan `checkSession()`.
+  Evolution API `created`, Fonnte `created`, Wwebjs `starting`, Waxum
+  `connecting`. Ambil QR-nya dengan `showQr()`, lalu pantau dengan
+  `checkSession()`.
 - **wuzapi tidak mengenal id sesi** — token yang terpasang sudah menentukan
   sesinya, jadi `createSession()` di sana berarti *menyambungkan* sesi dan
   `checkSession($id)` mengabaikan argumennya. Yang menandakan sesi siap dipakai
@@ -578,6 +598,10 @@ Catatan:
   middleware-nya. `createSession()` di sana juga **menunggu Chromium selesai
   dimuat** — bisa mendekati `WHATSAPP_TIMEOUT` bawaan (10 detik), jadi naikkan
   timeout kalau sering berakhir `TimeoutException`.
+- **Waxum menolak id sesi yang sudah dipakai dengan HTTP 409.** Jadi urutannya
+  berbeda dari OpenWA: panggil `checkSession()` lebih dulu, dan
+  `createSession()` hanya kalau sesinya memang belum ada. Id sesinya juga ikut
+  menentukan nama direktori penyimpanan, jadi SDK tidak meng-encode-nya.
 
 ## Konfigurasi
 
@@ -591,7 +615,7 @@ Lihat [`.env.example`](.env.example). Ringkasnya:
 | `WHATSAPP_TOKEN` | Token umum, dipakai bila token khusus gateway tidak ada. **Tidak dihitung mode `Auto`** |
 | `WHATSAPP_URL_<Provider>` | Base URL per gateway. **Ini yang sebaiknya dipakai** untuk self-hosted |
 | `WHATSAPP_URL` | Base URL cadangan bila kunci per-provider kosong. **Diabaikan Fonnte** |
-| `WHATSAPP_SESSION` | Khusus OpenWA dan Wwebjs. Juga id bawaan `createSession()`/`checkSession()` |
+| `WHATSAPP_SESSION` | Khusus OpenWA, Wwebjs, dan Waxum. Juga id bawaan `createSession()`/`checkSession()` |
 | `WHATSAPP_INSTANCE` | Khusus ApiMe dan Evolution API. Juga nama bawaan `createSession()` |
 | `WHATSAPP_ACCOUNT_TOKEN` | Khusus Fonnte Device API (`add-device`, `get-devices`). Bukan token perangkat |
 | `WHATSAPP_TIMEOUT` | Batas waktu request, detik (1–60, default 10) |
@@ -626,7 +650,8 @@ Urutan pembacaannya: kunci per-provider → `url` yang diberikan eksplisit →
 Nilai default bila semuanya dikosongkan: OpenWA `https://openwa.whatsapp.com`,
 ApiMe `https://api-me.whatsapp.com`, Evolution API
 `https://evolution-api.whatsapp.com`, Wuzapi `https://wuzapi.whatsapp.com`,
-Wwebjs `https://wwebjs.whatsapp.com`. Fonnte punya endpoint tetap sendiri.
+Wwebjs `https://wwebjs.whatsapp.com`, Waxum `https://waxum.whatsapp.com`.
+Fonnte punya endpoint tetap sendiri.
 
 ### Catatan per gateway
 
@@ -656,6 +681,14 @@ Wwebjs `https://wwebjs.whatsapp.com`. Fonnte punya endpoint tetap sendiri.
   endpoint terbuka. Pengiriman menuntut session yang sudah `CONNECTED`; selama
   belum, middleware-nya membalas HTTP 404 — dan SDK menerjemahkannya menjadi
   petunjuk yang jelas, bukan "Not Found" apa adanya.
+- **Waxum** — butuh `WHATSAPP_SESSION`, dan endpointnya semuanya di bawah
+  `/api/v1`. Auth memakai `Authorization: Bearer` berisi **token superadmin**
+  (`SUPERADMIN_TOKEN` di sisi server; JWT ber-klaim `role: superadmin` juga
+  diterima). Berbeda dari gateway lain, ia **tidak punya endpoint batch** —
+  pesan massal dikirim satu per satu — dan `createSession()` menolak id yang
+  sudah ada dengan HTTP 409, jadi periksa dulu dengan `checkSession()`.
+  Seluruh error-nya berbentuk `{"success":false,"error":{"code":N,"message":"…"}}`,
+  dengan HTTP 503 untuk sesi yang belum tersambung.
 
 ## Error
 
@@ -705,7 +738,7 @@ yang sudah teruji.
 
 ## Feature
 
-- [x] Enam gateway: Fonnte, OpenWA, ApiMe, Evolution API, Wuzapi, Wwebjs
+- [x] Tujuh gateway: Fonnte, OpenWA, ApiMe, Evolution API, Wuzapi, Wwebjs, Waxum
 - [x] Check Session
 - [x] Create sessions
 - [x] Show QR
@@ -714,11 +747,6 @@ yang sudah teruji.
 - [x] Send Media Image
 - [x] Send Media File
 - [x] Human Being Typing (`sendTyping()` eksplisit dan otomatis lewat `WHATSAPP_TYPING`)
-
-## Rencana Pengembangan
-
-- [ ] Menambahkan Gateway [Baileys API](https://github.com/rsuppersahabatan/baileys-api)
-- [ ] Menambahkan Gateway [Whatsameow Node API](https://github.com/mdestafadilah/api-whatsameow-node) based on [Whatsmeow Node](https://github.com/nicastelo/whatsmeow-node)
 
 ## Kredit
 
