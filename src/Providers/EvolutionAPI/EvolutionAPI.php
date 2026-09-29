@@ -24,6 +24,8 @@ use Sikuwa\Whatsapp\Support\Presence;
  *   WHATSAPP_URL_EvolutionAPI = base URL instance, mis. https://v7.rspwa.example.com
  *                               (`WHATSAPP_URL` juga dibaca sebagai fallback umum)
  *   WHATSAPP_INSTANCE = nama instance yang sudah tersambung
+ *                       (`WHATSAPP_INSTANCE_EvolutionAPI` menang atasnya,
+ *                       sehingga tiap gateway bisa punya instance sendiri)
  */
 final class EvolutionAPI extends AbstractProvider
 {
@@ -46,7 +48,9 @@ final class EvolutionAPI extends AbstractProvider
         parent::__construct($options, $http);
 
         $this->baseUrl = $this->config->url(self::DEFAULT_URL, self::NAME);
-        $this->instanceName = $this->config->instance();
+        // Lihat {@see Config::instance()}: `WHATSAPP_INSTANCE_EvolutionAPI`
+        // didahulukan atas `WHATSAPP_INSTANCE`.
+        $this->instanceName = $this->config->instance(self::NAME);
     }
 
     public function getProvider(): string

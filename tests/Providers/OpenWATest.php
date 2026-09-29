@@ -201,6 +201,30 @@ final class OpenWATest extends TestCase
         self::assertSame('tok-env', $backend->lastHeader('X-API-Key'));
     }
 
+    /**
+     * `WHATSAPP_SESSION_OpenWA` harus menang atas `WHATSAPP_SESSION` bersama,
+     * supaya OpenWA, Wwebjs, dan Waxum bisa memakai nama session masing-masing
+     * dalam satu aplikasi.
+     */
+    public function testProviderSessionBeatsSharedSessionFromEnvironment(): void
+    {
+        Config::useResolver(static fn (string $key): ?string => [
+            'WHATSAPP_SESSION' => 'sesi-bersama',
+            'WHATSAPP_SESSION_OpenWA' => 'sesi-openwa',
+            'WHATSAPP_TOKEN_OpenWA' => 'key-env',
+        ][$key] ?? null);
+
+        $backend = new MockBackend([MockBackend::json(['messageId' => 'x'])]);
+
+        (new OpenWA(null, $backend->executor()))
+            ->sendMessage(['destination' => '0811', 'message' => 'a']);
+
+        self::assertStringContainsString(
+            '/api/sessions/sesi-openwa/messages/send-text',
+            (string) $backend->lastRequest()?->getUri()
+        );
+    }
+
     public function testSessionIdIsUrlEncoded(): void
     {
         $backend = new MockBackend([MockBackend::json(['messageId' => 'x'])]);

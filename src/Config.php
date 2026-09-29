@@ -21,7 +21,8 @@ use Sikuwa\Whatsapp\Support\Typing;
  *
  * Kunci yang dikenali: `WA_NOTIFICATION`, `WHATSAPP_PROVIDER`,
  * `WHATSAPP_TOKEN`, `WHATSAPP_TOKEN_<Provider>`, `WHATSAPP_URL`,
- * `WHATSAPP_URL_<Provider>`, `WHATSAPP_SESSION`, `WHATSAPP_INSTANCE`,
+ * `WHATSAPP_URL_<Provider>`, `WHATSAPP_SESSION`, `WHATSAPP_SESSION_<Provider>`,
+ * `WHATSAPP_INSTANCE`, `WHATSAPP_INSTANCE_<Provider>`,
  * `WHATSAPP_ACCOUNT_TOKEN`, `WHATSAPP_TIMEOUT`, `WHATSAPP_PACING_CYCLE`,
  * `WHATSAPP_PACING_INTERVAL`, `WHATSAPP_PACING_LONG_CHARS`,
  * `WHATSAPP_PACING_LONG_FACTOR`, `WHATSAPP_TYPING`, `WHATSAPP_TYPING_SPEED`,
@@ -43,6 +44,12 @@ final class Config
      * @param array<string,string> $headers Header tambahan untuk setiap request.
      * @param array<string,string> $urls URL per provider, mis. ['OpenWA' => 'https://wa.internal'].
      *                                   Menang atas `WHATSAPP_URL_<Provider>`.
+     * @param string|null $session Id session eksplisit — lihat
+     *                             {@see self::session()}. Kunci
+     *                             `WHATSAPP_SESSION_<Provider>` tetap menang atasnya.
+     * @param string|null $instance Id instance eksplisit — lihat
+     *                              {@see self::instance()}. Kunci
+     *                              `WHATSAPP_INSTANCE_<Provider>` tetap menang atasnya.
      * @param string|null $accountToken Token akun, khusus Fonnte Device API —
      *                                  lihat {@see self::accountToken()}.
      * @param Pacing|null $pacing Pengatur jeda antar pesan saat mengirim
@@ -301,16 +308,70 @@ final class Config
         return ($this->url === null || $this->url === '') ? null : $this->url;
     }
 
-    /** Id session — hanya dipakai OpenWA. */
-    public function session(): string
+    /**
+     * Id session khusus satu provider: `WHATSAPP_SESSION_<Provider>`.
+     *
+     * Sama seperti {@see providerToken()} dan {@see providerUrl()}: kunci ini
+     * tidak pernah jatuh ke `WHATSAPP_SESSION`. Inilah yang membuat OpenWA,
+     * Wwebjs, dan Waxum bisa dikonfigurasi bersamaan — masing-masing bisa
+     * memakai nama sesinya sendiri.
+     *
+     * Nama provider ditulis apa adanya (`WHATSAPP_SESSION_OpenWA`), mengikuti
+     * kunci per-provider yang sudah ada, bukan diubah menjadi huruf besar.
+     */
+    public function providerSession(string $provider): ?string
     {
-        return $this->session ?? self::env('WHATSAPP_SESSION') ?? '';
+        $specific = self::env("WHATSAPP_SESSION_{$provider}");
+
+        return ($specific === null || $specific === '') ? null : $specific;
     }
 
-    /** Id/nama instance — dipakai ApiMe dan Evolution API. */
-    public function instance(): string
+    /**
+     * Id/nama instance khusus satu provider: `WHATSAPP_INSTANCE_<Provider>`.
+     *
+     * Seperti {@see providerSession()}, kunci ini tidak pernah jatuh ke
+     * `WHATSAPP_INSTANCE`, sehingga ApiMe dan Evolution API bisa punya
+     * instance yang berbeda dalam satu aplikasi.
+     */
+    public function providerInstance(string $provider): ?string
     {
-        return $this->instance ?? self::env('WHATSAPP_INSTANCE') ?? '';
+        $specific = self::env("WHATSAPP_INSTANCE_{$provider}");
+
+        return ($specific === null || $specific === '') ? null : $specific;
+    }
+
+    /**
+     * Id session efektif. Urutannya: kunci khusus provider, lalu nilai
+     * eksplisit, lalu `WHATSAPP_SESSION`.
+     *
+     * Dipakai OpenWA, Wwebjs, dan Waxum. Provider yang tidak memakai session
+     * (Fonnte, ApiMe, Evolution API, wuzapi) tetap bisa memanggil ini tanpa
+     * akibat apa pun — nilainya memang tidak dipakai di sana.
+     */
+    public function session(?string $provider = null): string
+    {
+        $specific = $provider !== null ? $this->providerSession($provider) : null;
+
+        return $specific
+            ?? (($this->session === null || $this->session === '') ? null : $this->session)
+            ?? self::env('WHATSAPP_SESSION')
+            ?? '';
+    }
+
+    /**
+     * Id/nama instance efektif. Urutannya: kunci khusus provider, lalu nilai
+     * eksplisit, lalu `WHATSAPP_INSTANCE`.
+     *
+     * Dipakai ApiMe dan Evolution API.
+     */
+    public function instance(?string $provider = null): string
+    {
+        $specific = $provider !== null ? $this->providerInstance($provider) : null;
+
+        return $specific
+            ?? (($this->instance === null || $this->instance === '') ? null : $this->instance)
+            ?? self::env('WHATSAPP_INSTANCE')
+            ?? '';
     }
 
     /**

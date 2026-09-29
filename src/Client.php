@@ -331,7 +331,9 @@ final class Client
      * Baca keadaan sesi yang sudah ada.
      *
      * @param string|null $id Sesi yang diperiksa; default dari konfigurasi
-     *                        (`WHATSAPP_SESSION` / `WHATSAPP_INSTANCE`).
+     *                        (`WHATSAPP_SESSION_<Provider>` /
+     *                        `WHATSAPP_INSTANCE_<Provider>`, lalu kunci
+     *                        bersamanya).
      *
      * @throws WhatsappException
      */
@@ -358,7 +360,9 @@ final class Client
      * `isConnected() === true` dengan `hasQr() === false` — bukan exception.
      *
      * @param string|null $id Sesi yang diminta QR-nya; default dari konfigurasi
-     *                        (`WHATSAPP_SESSION` / `WHATSAPP_INSTANCE`).
+     *                        (`WHATSAPP_SESSION_<Provider>` /
+     *                        `WHATSAPP_INSTANCE_<Provider>`, lalu kunci
+     *                        bersamanya).
      *
      * @throws WhatsappException
      */

@@ -24,6 +24,8 @@ use Sikuwa\Whatsapp\Support\Text;
  *   WHATSAPP_URL_Wwebjs = base URL instance, mis. https://wwebjs.example.com
  *                         (`WHATSAPP_URL` juga dibaca sebagai fallback umum)
  *   WHATSAPP_SESSION    = id session: huruf, angka, `_`, dan `-` saja
+ *                         (`WHATSAPP_SESSION_Wwebjs` menang atasnya, jadi
+ *                         session wwebjs tidak bertabrakan dengan gateway lain)
  *
  * Dua hal yang membedakannya dari gateway lain di SDK ini:
  *
@@ -56,7 +58,9 @@ final class Wwebjs extends AbstractProvider
         parent::__construct($options, $http);
 
         $this->baseUrl = $this->config->url(self::DEFAULT_URL, self::NAME);
-        $this->sessionId = $this->config->session();
+        // Lihat {@see Config::session()}: kunci `WHATSAPP_SESSION_Wwebjs`
+        // didahulukan atas `WHATSAPP_SESSION`.
+        $this->sessionId = $this->config->session(self::NAME);
     }
 
     public function getProvider(): string

@@ -478,6 +478,26 @@ final class WaxumTest extends TestCase
         self::assertSame('Bearer tok-env', $backend->lastHeader('Authorization'));
     }
 
+    /** Kunci session per-provider menang atas `WHATSAPP_SESSION` bersama. */
+    public function testProviderSessionBeatsSharedSessionFromEnvironment(): void
+    {
+        Config::useResolver(static fn (string $key): ?string => [
+            'WHATSAPP_SESSION' => 'sesi-bersama',
+            'WHATSAPP_SESSION_Waxum' => 'sesi-waxum',
+            'WHATSAPP_TOKEN_Waxum' => 'tok-env',
+        ][$key] ?? null);
+
+        $backend = new MockBackend([MockBackend::json(['message_id' => 'x'])]);
+
+        (new Waxum(null, $backend->executor()))
+            ->sendMessage(['destination' => '0811', 'message' => 'a']);
+
+        self::assertSame(
+            'https://waxum.whatsapp.com' . self::API . '/sessions/sesi-waxum/messages/text',
+            (string) $backend->lastRequest()?->getUri()
+        );
+    }
+
     public function testProviderNameAndDefaultUrl(): void
     {
         self::assertSame('Waxum', (new Waxum(['token' => 't']))->getProvider());

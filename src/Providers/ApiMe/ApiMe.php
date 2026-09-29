@@ -23,6 +23,8 @@ use Sikuwa\Whatsapp\Support\Presence;
  *   WHATSAPP_URL_ApiMe = base URL instance, mis. https://v14.example.com
  *                       (`WHATSAPP_URL` juga dibaca sebagai fallback umum)
  *   WHATSAPP_INSTANCE = UUID instance yang sudah tersambung
+ *                       (`WHATSAPP_INSTANCE_ApiMe` menang atasnya, sehingga
+ *                       ApiMe dan Evolution API bisa memakai instance berbeda)
  *
  * Catatan: ApiMe menuntut token BER-SCOPE INSTANCE. Token user (JWT login)
  * maupun API token global ditolak dengan HTTP 403 oleh endpoint pengiriman.
@@ -50,10 +52,11 @@ final class ApiMe extends AbstractProvider
         parent::__construct($options, $http);
 
         $url = $this->config->url(self::DEFAULT_URL, self::NAME);
-
         // Terima "http://host:8080" maupun "http://host:8080/api" tanpa jadi "/api/api".
         $this->baseUrl = preg_replace('#/api$#', '', $url) ?? $url;
-        $this->instanceId = $this->config->instance();
+        // Nama provider ikut diberikan supaya `WHATSAPP_INSTANCE_ApiMe`
+        // didahulukan — lihat {@see Config::instance()}.
+        $this->instanceId = $this->config->instance(self::NAME);
     }
 
     public function getProvider(): string

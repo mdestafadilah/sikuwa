@@ -24,6 +24,9 @@ use Sikuwa\Whatsapp\Support\Presence;
  *   WHATSAPP_URL_OpenWA = base URL instance, mis. https://v15.example.com
  *                         (`WHATSAPP_URL` juga dibaca sebagai fallback umum)
  *   WHATSAPP_SESSION  = id session yang sudah di-start dan tersambung
+ *                       (`WHATSAPP_SESSION_OpenWA` menang atasnya, sehingga
+ *                       OpenWA bisa memakai sesi sendiri tanpa mengganggu
+ *                       gateway lain)
  */
 final class OpenWA extends AbstractProvider
 {
@@ -46,7 +49,9 @@ final class OpenWA extends AbstractProvider
         parent::__construct($options, $http);
 
         $this->baseUrl = $this->config->url(self::DEFAULT_URL, self::NAME);
-        $this->sessionId = $this->config->session();
+        // Nama provider ikut diberikan supaya `WHATSAPP_SESSION_OpenWA`
+        // didahulukan — lihat {@see Config::session()}.
+        $this->sessionId = $this->config->session(self::NAME);
     }
 
     public function getProvider(): string

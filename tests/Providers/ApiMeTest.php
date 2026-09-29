@@ -234,4 +234,27 @@ final class ApiMeTest extends TestCase
             (string) $backend->lastRequest()?->getUri()
         );
     }
+
+    /**
+     * Kunci instance per-provider menang atas `WHATSAPP_INSTANCE` bersama,
+     * supaya ApiMe dan Evolution API bisa memakai instance yang berbeda.
+     */
+    public function testProviderInstanceBeatsSharedInstanceFromEnvironment(): void
+    {
+        Config::useResolver(static fn (string $key): ?string => [
+            'WHATSAPP_URL' => 'https://v14.test',
+            'WHATSAPP_INSTANCE' => 'inst-bersama',
+            'WHATSAPP_INSTANCE_ApiMe' => 'inst-apime',
+            'WHATSAPP_TOKEN_ApiMe' => 'instance-token',
+        ][$key] ?? null);
+
+        $backend = new MockBackend([MockBackend::json(['data' => ['whatsappId' => 'a']])]);
+
+        (new ApiMe(null, $backend->executor()))->sendMessage(['destination' => '0811', 'message' => 'a']);
+
+        self::assertSame(
+            self::BASE . '/api/instances/inst-apime/messages/text',
+            (string) $backend->lastRequest()?->getUri()
+        );
+    }
 }

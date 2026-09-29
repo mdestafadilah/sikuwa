@@ -23,7 +23,9 @@ use Sikuwa\Whatsapp\Support\Presence;
  *   WHATSAPP_URL_Waxum  = base URL instance, mis. http://localhost:3451
  *                         (`WHATSAPP_URL` juga dibaca sebagai fallback umum)
  *   WHATSAPP_SESSION    = id sesi yang sudah dipindai (juga id bawaan
- *                         createSession()/checkSession())
+ *                         createSession()/checkSession()).
+ *                         `WHATSAPP_SESSION_Waxum` menang atasnya, sehingga
+ *                         id sesi waxum tidak perlu sama dengan gateway lain.
  *
  * Berbeda dari OpenWA dan Wwebjs, sesi di sini tidak perlu dibuat lebih dulu:
  * `createSession()` dengan id yang sudah ada akan ditolak HTTP 409, jadi
@@ -61,7 +63,8 @@ final class Waxum extends AbstractProvider
         // Terima "http://host:3451" maupun "http://host:3451/api/v1" tanpa jadi
         // "/api/v1/api/v1".
         $this->baseUrl = preg_replace('#/api/v1$#', '', $url) ?? $url;
-        $this->sessionId = $this->config->session();
+        // Lihat {@see Config::session()}: `WHATSAPP_SESSION_Waxum` didahulukan.
+        $this->sessionId = $this->config->session(self::NAME);
     }
 
     public function getProvider(): string

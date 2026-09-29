@@ -422,4 +422,24 @@ final class WwebjsTest extends TestCase
         );
         self::assertSame('tok-env', $backend->lastHeader('x-api-key'));
     }
+
+    /** Kunci session per-provider menang atas `WHATSAPP_SESSION` bersama. */
+    public function testProviderSessionBeatsSharedSessionFromEnvironment(): void
+    {
+        Config::useResolver(static fn (string $key): ?string => [
+            'WHATSAPP_SESSION' => 'sesi-bersama',
+            'WHATSAPP_SESSION_Wwebjs' => 'sesi-wwebjs',
+            'WHATSAPP_TOKEN_Wwebjs' => 'tok-env',
+        ][$key] ?? null);
+
+        $backend = new MockBackend([MockBackend::json(['success' => true, 'message' => ['id' => ['id' => 'a']]])]);
+
+        (new Wwebjs(null, $backend->executor()))
+            ->sendMessage(['destination' => '0811', 'message' => 'a']);
+
+        self::assertStringContainsString(
+            '/client/sendMessage/sesi-wwebjs',
+            (string) $backend->lastRequest()?->getUri()
+        );
+    }
 }

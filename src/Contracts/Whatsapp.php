@@ -188,11 +188,13 @@ interface Whatsapp
      * Buat sesi/instance baru di gateway.
      *
      * Nama sesi diambil dari `$options` bila ada, selain itu dari konfigurasi
-     * yang sudah terpasang (`WHATSAPP_SESSION` / `WHATSAPP_INSTANCE`). Karena
-     * itu `createSession()` tanpa argumen pun masuk akal di aplikasi yang
-     * seluruh kredensialnya sudah ada di `.env`. Fonnte adalah pengecualian:
-     * ia memang menuntut `name` dan `device` di `$options`, karena perangkat
-     * baru butuh nomor yang belum pernah dipakai.
+     * yang sudah terpasang — `WHATSAPP_SESSION_<Provider>` dulu, baru
+     * `WHATSAPP_SESSION`, dan `WHATSAPP_INSTANCE_<Provider>` dulu, baru
+     * `WHATSAPP_INSTANCE`. Karena itu `createSession()` tanpa argumen pun masuk
+     * akal di aplikasi yang seluruh kredensialnya sudah ada di `.env`, dan tiap
+     * gateway tetap bisa memakai nama sesi/instance-nya sendiri. Fonnte adalah
+     * pengecualian: ia memang menuntut `name` dan `device` di `$options`,
+     * karena perangkat baru butuh nomor yang belum pernah dipakai.
      *
      * Kunci `$options` yang dikenali berbeda per gateway dan diteruskan apa
      * adanya — mis. OpenWA `id`, `name`, `config`; ApiMe `name`,

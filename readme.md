@@ -471,11 +471,12 @@ supaya pesan bisa dikirim lewat sesi tersebut. Baik `$token` maupun `$raw`
 sengaja **tidak** ikut di `toArray()`/`toJson()`, karena keluaran itu biasanya
 berakhir di log atau response HTTP.
 
-Nama sesi diambil dari `$options` bila diberikan, selain itu dari konfigurasi
-(`WHATSAPP_SESSION` / `WHATSAPP_INSTANCE`) — jadi `createSession()` tanpa
-argumen tetap masuk akal di aplikasi yang kredensialnya sudah ada di `.env`.
-Fonnte adalah pengecualian: `createSession()` di sana memang menuntut `name`
-dan `device`, karena perangkat baru butuh nomor yang belum pernah dipakai.
+Nama sesi diambil dari `$options` bila diberikan, selain itu dari konfigurasi —
+`WHATSAPP_SESSION_<Provider>` / `WHATSAPP_INSTANCE_<Provider>` lebih dulu, baru
+`WHATSAPP_SESSION` / `WHATSAPP_INSTANCE` — jadi `createSession()` tanpa argumen
+tetap masuk akal di aplikasi yang kredensialnya sudah ada di `.env`. Fonnte
+adalah pengecualian: `createSession()` di sana memang menuntut `name` dan
+`device`, karena perangkat baru butuh nomor yang belum pernah dipakai.
 
 ### QR sesi
 
@@ -615,8 +616,10 @@ Lihat [`.env.example`](.env.example). Ringkasnya:
 | `WHATSAPP_TOKEN` | Token umum, dipakai bila token khusus gateway tidak ada. **Tidak dihitung mode `Auto`** |
 | `WHATSAPP_URL_<Provider>` | Base URL per gateway. **Ini yang sebaiknya dipakai** untuk self-hosted |
 | `WHATSAPP_URL` | Base URL cadangan bila kunci per-provider kosong. **Diabaikan Fonnte** |
-| `WHATSAPP_SESSION` | Khusus OpenWA, Wwebjs, dan Waxum. Juga id bawaan `createSession()`/`checkSession()` |
-| `WHATSAPP_INSTANCE` | Khusus ApiMe dan Evolution API. Juga nama bawaan `createSession()` |
+| `WHATSAPP_SESSION_<Provider>` | Id session per gateway. **Ini yang sebaiknya dipakai** bila beberapa gateway butuh session berbeda |
+| `WHATSAPP_SESSION` | Id session cadangan bila kunci per-provider kosong |
+| `WHATSAPP_INSTANCE_<Provider>` | Id/nama instance per gateway |
+| `WHATSAPP_INSTANCE` | Id/nama instance cadangan bila kunci per-provider kosong |
 | `WHATSAPP_ACCOUNT_TOKEN` | Khusus Fonnte Device API (`add-device`, `get-devices`). Bukan token perangkat |
 | `WHATSAPP_TIMEOUT` | Batas waktu request, detik (1–60, default 10) |
 | `WHATSAPP_PACING_CYCLE` | Jeda tetap yang dipakai bergiliran antar pesan, detik. Mis. `0,30`. Kosong = pacing mati |
@@ -653,6 +656,30 @@ ApiMe `https://api-me.whatsapp.com`, Evolution API
 Wwebjs `https://wwebjs.whatsapp.com`, Waxum `https://waxum.whatsapp.com`.
 Fonnte punya endpoint tetap sendiri.
 
+### Session per gateway
+
+Alasan yang sama berlaku untuk session: satu `WHATSAPP_SESSION` bersama akan
+dipakai OpenWA, Wwebjs, dan Waxum sekaligus, sehingga tiga gateway tidak bisa
+memakai nama session yang berbeda — padahal ketiganya sering berjalan
+berdampingan dan **tidak boleh** berbagi session. Pakai kunci per-provider:
+
+```dotenv
+WHATSAPP_SESSION_OpenWA=notif-sekolah
+WHATSAPP_SESSION_Wwebjs=notif-wwebjs
+WHATSAPP_SESSION_Waxum=notif-waxum
+WHATSAPP_INSTANCE_ApiMe=8f1c…
+WHATSAPP_INSTANCE_EvolutionAPI=sikuwa
+```
+
+Urutan pembacaannya sama seperti token dan URL: kunci per-provider → nilai
+`session`/`instance` yang diberikan eksplisit → `WHATSAPP_SESSION` /
+`WHATSAPP_INSTANCE`. Kunci per-provider sengaja **tidak** jatuh ke kunci bersama.
+Tiap gateway membaca kuncinya sendiri, jadi `WHATSAPP_SESSION_OpenWA` tidak akan
+pernah terpakai oleh Wwebjs atau Waxum.
+
+Nama provider ditulis apa adanya mengikuti kunci per-provider yang sudah ada
+(`WHATSAPP_SESSION_OpenWA`), bukan diubah menjadi huruf besar.
+
 ### Catatan per gateway
 
 - **Fonnte** — selalu membalas HTTP 200; keberhasilan sebenarnya ada di field
@@ -663,30 +690,34 @@ Fonnte punya endpoint tetap sendiri.
   Device API-nya memakai **account token** (`WHATSAPP_ACCOUNT_TOKEN`), bukan
   token perangkat, dan host-nya diturunkan dari URL pengiriman — jadi override
   proxy ikut berlaku untuk `add-device` dan `get-devices`.
-- **OpenWA** — butuh `WHATSAPP_SESSION`. Satu pesan dikirim ke `send-text`
-  (sinkron, balasannya `messageId`); lebih dari satu dikirim ke `send-bulk`
-  (asinkron, balasannya `batchId`, maksimum 100 pesan per batch).
-- **ApiMe** — butuh `WHATSAPP_INSTANCE` dan token **ber-scope instance**; JWT
-  user maupun API token global ditolak dengan HTTP 403. Pengiriman memakai
-  `Idempotency-Key` deterministik, sehingga kartu yang ter-scan dua kali
-  beruntun tidak menghasilkan dua pesan.
-- **Evolution API** — butuh `WHATSAPP_INSTANCE`. `delay` dititipkan ke server
-  lewat payload (dalam milidetik), jadi klien tidak ikut menunggu. Nilainya
-  diambil dari `delay` pesan, atau dari pacing bila tidak diisi.
+- **OpenWA** — butuh `WHATSAPP_SESSION` (atau `WHATSAPP_SESSION_OpenWA`). Satu
+  pesan dikirim ke `send-text` (sinkron, balasannya `messageId`); lebih dari
+  satu dikirim ke `send-bulk` (asinkron, balasannya `batchId`, maksimum 100
+  pesan per batch).
+- **ApiMe** — butuh `WHATSAPP_INSTANCE` (atau `WHATSAPP_INSTANCE_ApiMe`) dan
+  token **ber-scope instance**; JWT user maupun API token global ditolak dengan
+  HTTP 403. Pengiriman memakai `Idempotency-Key` deterministik, sehingga kartu
+  yang ter-scan dua kali beruntun tidak menghasilkan dua pesan.
+- **Evolution API** — butuh `WHATSAPP_INSTANCE` (atau
+  `WHATSAPP_INSTANCE_EvolutionAPI`). `delay` dititipkan ke server lewat payload
+  (dalam milidetik), jadi klien tidak ikut menunggu. Nilainya diambil dari
+  `delay` pesan, atau dari pacing bila tidak diisi.
 - **Wuzapi** — tidak butuh instance: tokennya sendiri yang menentukan sesi.
   Auth memakai header `Token`, bukan `Authorization` seperti yang tertulis di
   README wuzapi.
-- **Wwebjs** — butuh `WHATSAPP_SESSION`. Auth memakai header `x-api-key`, dan
-  **API key-nya opsional**: selama `API_KEY` tidak diisi di sisi server, semua
-  endpoint terbuka. Pengiriman menuntut session yang sudah `CONNECTED`; selama
-  belum, middleware-nya membalas HTTP 404 — dan SDK menerjemahkannya menjadi
-  petunjuk yang jelas, bukan "Not Found" apa adanya.
-- **Waxum** — butuh `WHATSAPP_SESSION`, dan endpointnya semuanya di bawah
-  `/api/v1`. Auth memakai `Authorization: Bearer` berisi **token superadmin**
-  (`SUPERADMIN_TOKEN` di sisi server; JWT ber-klaim `role: superadmin` juga
-  diterima). Berbeda dari gateway lain, ia **tidak punya endpoint batch** —
-  pesan massal dikirim satu per satu — dan `createSession()` menolak id yang
-  sudah ada dengan HTTP 409, jadi periksa dulu dengan `checkSession()`.
+- **Wwebjs** — butuh `WHATSAPP_SESSION` (atau `WHATSAPP_SESSION_Wwebjs`). Auth
+  memakai header `x-api-key`, dan **API key-nya opsional**: selama `API_KEY`
+  tidak diisi di sisi server, semua endpoint terbuka. Pengiriman menuntut
+  session yang sudah `CONNECTED`; selama belum, middleware-nya membalas HTTP
+  404 — dan SDK menerjemahkannya menjadi petunjuk yang jelas, bukan "Not Found"
+  apa adanya.
+- **Waxum** — butuh `WHATSAPP_SESSION` (atau `WHATSAPP_SESSION_Waxum`), dan
+  endpointnya semuanya di bawah `/api/v1`. Auth memakai
+  `Authorization: Bearer` berisi **token superadmin** (`SUPERADMIN_TOKEN` di
+  sisi server; JWT ber-klaim `role: superadmin` juga diterima). Berbeda dari
+  gateway lain, ia **tidak punya endpoint batch** — pesan massal dikirim satu
+  per satu — dan `createSession()` menolak id yang sudah ada dengan HTTP 409,
+  jadi periksa dulu dengan `checkSession()`.
   Seluruh error-nya berbentuk `{"success":false,"error":{"code":N,"message":"…"}}`,
   dengan HTTP 503 untuk sesi yang belum tersambung.
 

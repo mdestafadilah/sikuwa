@@ -165,4 +165,27 @@ final class EvolutionAPITest extends TestCase
         self::assertSame(2, $backend->count());
         self::assertLessThan(1.0, microtime(true) - $mulai, 'Pengiriman bulk tidak boleh memblokir pemanggil');
     }
+
+    /**
+     * Kunci instance per-provider menang atas `WHATSAPP_INSTANCE` bersama,
+     * supaya Evolution API dan ApiMe bisa memakai instance yang berbeda.
+     */
+    public function testProviderInstanceBeatsSharedInstanceFromEnvironment(): void
+    {
+        Config::useResolver(static fn (string $key): ?string => [
+            'WHATSAPP_URL' => 'https://v7.test',
+            'WHATSAPP_INSTANCE' => 'inst-bersama',
+            'WHATSAPP_INSTANCE_EvolutionAPI' => 'inst-evo',
+            'WHATSAPP_TOKEN_EvolutionAPI' => 'api-key',
+        ][$key] ?? null);
+
+        $backend = new MockBackend([MockBackend::json(['key' => ['id' => 'a']])]);
+
+        (new EvolutionAPI(null, $backend->executor()))->sendMessage(['destination' => '0811', 'message' => 'a']);
+
+        self::assertSame(
+            self::BASE . '/message/sendText/inst-evo',
+            (string) $backend->lastRequest()?->getUri()
+        );
+    }
 }

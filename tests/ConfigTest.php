@@ -233,6 +233,100 @@ final class ConfigTest extends TestCase
         self::assertSame('https://openwa.test', Config::fromEnvironment()->url('', 'OpenWA'));
     }
 
+    /**
+     * Inti fitur session per-provider: tiga gateway bisa memakai nama session
+     * yang berbeda-beda bersamaan. Dengan satu `WHATSAPP_SESSION` bersama, nama
+     * yang ditujukan untuk OpenWA ikut terpakai Wwebjs dan Waxum.
+     */
+    public function testProviderSessionBeatsSessionOptionAndEnvironment(): void
+    {
+        self::fakeEnv([
+            'WHATSAPP_SESSION' => 'bersama',
+            'WHATSAPP_SESSION_OpenWA' => 'sesi-openwa',
+        ]);
+
+        $config = Config::fromEnvironment();
+
+        self::assertSame('sesi-openwa', $config->session('OpenWA'));
+        // Provider yang tidak punya kunci sendiri tetap memakai yang bersama.
+        self::assertSame('bersama', $config->session('Wwebjs'));
+
+        // Kunci per-provider juga menang atas opsi `session` eksplisit.
+        self::assertSame('sesi-openwa', Config::from(['session' => 'eksplisit'])->session('OpenWA'));
+        self::assertSame('eksplisit', Config::from(['session' => 'eksplisit'])->session('Wwebjs'));
+    }
+
+    /** Sama seperti token dan URL: kunci per-provider tidak jatuh ke kunci umum. */
+    public function testProviderSessionDoesNotFallBackToSharedSession(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSION' => 'bersama']);
+
+        self::assertNull(Config::fromEnvironment()->providerSession('OpenWA'));
+    }
+
+    public function testProviderInstanceBeatsInstanceOptionAndEnvironment(): void
+    {
+        self::fakeEnv([
+            'WHATSAPP_INSTANCE' => 'bersama',
+            'WHATSAPP_INSTANCE_EvolutionAPI' => 'instance-evo',
+        ]);
+
+        $config = Config::fromEnvironment();
+
+        self::assertSame('instance-evo', $config->instance('EvolutionAPI'));
+        self::assertSame('bersama', $config->instance('ApiMe'));
+    }
+
+    /** Kunci per-provider tidak pernah jatuh ke kunci umum. */
+    public function testProviderInstanceDoesNotFallBackToSharedInstance(): void
+    {
+        self::fakeEnv(['WHATSAPP_INSTANCE' => 'bersama']);
+
+        self::assertNull(Config::fromEnvironment()->providerInstance('ApiMe'));
+    }
+
+    /**
+     * Tanpa nama provider, `session()` dan `instance()` harus berperilaku
+     * persis seperti sebelum fitur ini ada — kalau tidak, pemanggil lama yang
+     * tidak menyebut provider ikut berubah diam-diam.
+     */
+    public function testSessionAndInstanceWithoutProviderBehaveAsBefore(): void
+    {
+        self::fakeEnv([
+            'WHATSAPP_SESSION' => 'sesi-lama',
+            'WHATSAPP_INSTANCE' => 'inst-lama',
+            'WHATSAPP_SESSION_OpenWA' => 'diabaikan',
+            'WHATSAPP_INSTANCE_ApiMe' => 'diabaikan',
+        ]);
+
+        $config = Config::fromEnvironment();
+
+        self::assertSame('sesi-lama', $config->session());
+        self::assertSame('inst-lama', $config->instance());
+    }
+
+    public function testSessionAndInstanceOptionsWinOverEnvironment(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSION' => 'dari-env', 'WHATSAPP_INSTANCE' => 'dari-env']);
+
+        $config = Config::from(['session' => 'sesi-opsi', 'instance' => 'inst-opsi']);
+
+        self::assertSame('sesi-opsi', $config->session());
+        self::assertSame('inst-opsi', $config->instance());
+    }
+
+    public function testEmptyEnvironmentSessionAndInstanceAreTreatedAsAbsent(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSION' => '', 'WHATSAPP_INSTANCE' => '']);
+
+        $config = Config::fromEnvironment();
+
+        self::assertSame('', $config->session());
+        self::assertSame('', $config->instance());
+        self::assertSame('', $config->session('OpenWA'));
+        self::assertSame('', $config->instance('ApiMe'));
+    }
+
     public function testFromAcceptsConfigInstance(): void
     {
         $config = Config::from(['token' => 'tok']);
