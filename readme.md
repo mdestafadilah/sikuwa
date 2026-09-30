@@ -920,6 +920,153 @@ try {
 Bawaannya **mati** karena mengulang berarti menahan proses pemanggil lebih lama,
 sama seperti pacing dan pagar laju.
 
+## Mengirim banyak pesan lewat worker
+
+SDK ini **sinkron**: `send()` menahan proses pemanggil sampai semua pesannya
+selesai. Kalau Anda menyerahkan 500 nomor sekaligus dengan pacing dan pagar laju
+menyala, satu panggilan itu bisa menahan PHP-FPM **berjam-jam** — di luar
+`max_execution_time`, dan kalau gagal di tengah Anda tidak tahu mana yang sudah
+terkirim.
+
+Karena itu pengiriman besar sebaiknya dipecah sendiri oleh aplikasi Anda, dan
+SDK-nya dipanggil dalam potongan kecil. SDK tidak menyimpan antrean: siapa yang
+belum terkirim, jam berapa harus dikirim, dan bagaimana mengulang yang gagal
+adalah urusan aplikasi.
+
+### Polanya
+
+Tiga komponen, semuanya di sisi Anda:
+
+1. **Tabel antrean** — satu baris per pesan, dengan status.
+2. **Worker** — dijalankan cron, mengambil sekian baris, memanggil SDK.
+3. **Jadwal** — kapan worker boleh jalan, dan kapan pesan boleh dikirim.
+
+```sql
+CREATE TABLE outbox (
+    id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+    destination VARCHAR(20)  NOT NULL,
+    message     TEXT         NOT NULL,
+    status      VARCHAR(16)  NOT NULL DEFAULT 'pending',  -- pending|sent|failed
+    attempts    TINYINT      NOT NULL DEFAULT 0,
+    last_error  TEXT         NULL,
+    due_at      DATETIME     NOT NULL,                    -- kapan boleh dikirim
+    sent_at     DATETIME     NULL,
+    INDEX (status, due_at)
+);
+```
+
+```php
+// worker.php — cron: */5 * * * * php worker.php
+require 'vendor/autoload.php';
+
+use Sikuwa\Whatsapp\Client;
+use Sikuwa\Whatsapp\Exceptions\RateLimitException;
+
+$client = new Client();          // pacing + throttle dari .env
+$db     = new PDO(/* ... */);
+
+/**
+ * Placeholder `?` sebanyak nilainya.
+ *
+ * Menulis `IN (?)` lalu menghubungkan id-nya dengan koma adalah kesalahan yang
+ * mudah terjadi: satu placeholder hanya cocok dengan SATU nilai, sehingga
+ * sisanya diam-diam tidak ikut diperbarui — tanpa error apa pun.
+ *
+ * @param array<int,int|string> $ids
+ */
+$placeholders = static fn (array $ids): string => implode(',', array_fill(0, \count($ids), '?'));
+
+// 1. Ambil potongan kecil. Batas inilah yang menjaga satu panggilan tetap pendek.
+$rows = $db->query("
+    SELECT * FROM outbox
+    WHERE status = 'pending' AND due_at <= NOW()
+    ORDER BY due_at
+    LIMIT 50
+")->fetchAll();
+
+if ($rows === []) {
+    exit;                        // tidak ada pekerjaan
+}
+
+// 2. Kelompokkan per nomor. Mengirim ke satu nomor dalam satu panggilan
+//    membuat kegagalan satu pesan tidak menyeret nomor lain.
+$byTarget = [];
+
+foreach ($rows as $row) {
+    $byTarget[$row['destination']][] = $row;
+}
+
+foreach ($byTarget as $group) {
+    $ids = array_column($group, 'id');
+
+    // 3. Kirim. Satu panggilan per nomor, dan luruskan `pending` hanya
+    //    SETELAH send() kembali — kalau prosesnya mati di tengah, paling
+    //    banyak pesan itu terkirim ulang, bukan hilang tanpa jejak.
+    try {
+        $client->send(array_map(
+            fn (array $row): array => ['destination' => $row['destination'], 'message' => $row['message']],
+            $group
+        ));
+
+        $db->prepare('UPDATE outbox SET status = ?, sent_at = NOW() WHERE id IN (' . $placeholders($ids) . ')')
+           ->execute(['sent', ...$ids]);
+
+    } catch (RateLimitException $e) {
+        // Kena batas laju bukan kesalahan pesannya, jadi `attempts` tidak
+        // dinaikkan — hanya jadwalnya yang mundur. Angkanya dari gateway,
+        // bukan tebakan: itulah guna getRetryAfter().
+        $delay = $e->getRetryAfter() ?? 300;
+        $sql = 'UPDATE outbox SET due_at = DATE_ADD(NOW(), INTERVAL ? SECOND) WHERE id IN (' . $placeholders($ids) . ')';
+        $db->prepare($sql)->execute([$delay, ...$ids]);
+
+    } catch (\Throwable $e) {
+        // Kegagalan lain (nomor tidak terdaftar, token ditolak): naikkan
+        // hitungan, dan menyerah setelah tiga kali supaya tidak berputar
+        // selamanya di baris yang memang tidak akan pernah berhasil.
+        foreach ($group as $row) {
+            $attempts = (int) $row['attempts'] + 1;
+            $db->prepare('UPDATE outbox SET attempts = ?, last_error = ?, status = ? WHERE id = ?')
+               ->execute([
+                   $attempts,
+                   $e->getMessage(),
+                   $attempts >= 3 ? 'failed' : 'pending',
+                   $row['id'],
+               ]);
+        }
+    }
+}
+```
+
+### Empat hal yang membuat pola ini bekerja
+
+- **Potongan kecil (`LIMIT 50`) adalah pengaman utamanya.** Dengan pacing
+  `0,30` + jitter 20–30 detik, 50 pesan butuh sekitar 20 menit — masih di dalam
+  `max_execution_time` yang wajar, dan kalau worker mati di tengah, yang hilang
+  paling banyak 50 baris yang statusnya masih `pending`.
+- **Menandai `sent` setelah `send()` kembali.** Jangan menandai sebelum
+  mengirim: kalau prosesnya mati di antaranya, pesan yang sebenarnya terkirim
+  akan dikirim ulang. Lebih baik ada pesan yang terlewat sesekali daripada
+  pelanggan menerima notifikasi yang sama dua kali.
+- **`due_at` yang menentukan jam kirim, bukan SDK.** SDK tidak tahu jam 9 pagi —
+  isi `due_at` dengan jam yang Anda inginkan, dan worker hanya mengambil baris
+  yang sudah jatuh tempo. Ini juga cara menghindari mengirim tengah malam.
+- **`RateLimitException` menaikkan `due_at`, bukan `attempts`.** Kena batas laju
+  bukan kesalahan pesannya, jadi jangan dihitung sebagai percobaan gagal yang
+  menghabiskan jatahnya.
+
+### Kenapa SDK tidak menyediakan antreannya
+
+Menaruh antrean di dalam library berarti SDK harus tahu database Anda, jadwal
+cron Anda, dan kebijakan percobaan ulang Anda — lalu menyimpannya di antara
+panggilan. Pada titik itu ia bukan lagi library, melainkan aplikasi, dan ia akan
+bertabrakan dengan queue yang sudah Anda pakai (Laravel Queue, Symfony Messenger,
+BullMQ). Yang SDK kerjakan adalah **mengirim satu potongan dengan laju yang
+wajar**; sisanya memang keputusan aplikasi.
+
+Untuk potongan besar sekaligus, `Throttle` tetap berguna — ia yang membuat
+panggilan tidak menembak terlalu cepat. Tetapi batas `LIMIT`-nya tetap di sisi
+Anda: SDK menegakkan *laju*, bukan *durasi*.
+
 ## Error
 
 Semua error melempar subclass dari `Sikuwa\Whatsapp\Exceptions\WhatsappException`:
