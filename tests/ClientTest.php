@@ -34,6 +34,79 @@ final class ClientTest extends TestCase
         self::assertSame('Fonnte', $client->provider()->getProvider());
     }
 
+    /**
+     * Inti fitur ini: nama gateway bisa diketahui tanpa membangun objeknya,
+     * dan ejaannya mengikuti `PROVIDERS` — bukan apa yang diketik pemanggil.
+     */
+    public function testProviderNameReturnsCanonicalNameWithoutBuildingGateway(): void
+    {
+        $client = new Client(['provider' => 'openwa']);
+
+        self::assertSame('OpenWA', $client->providerName());
+    }
+
+    public function testProviderNameFallsBackToEnvironment(): void
+    {
+        self::fakeEnv(['WHATSAPP_PROVIDER' => 'Wuzapi']);
+
+        self::assertSame('Wuzapi', (new Client())->providerName());
+    }
+
+    public function testProviderNameOverridesEnvironmentAndAuto(): void
+    {
+        self::fakeEnv([
+            'WHATSAPP_PROVIDER' => 'Auto',
+            'WHATSAPP_TOKEN_Wuzapi' => 'k',
+        ]);
+
+        self::assertSame('Fonnte', (new Client())->providerName('fonnte'));
+    }
+
+    /**
+     * Nama yang dikembalikan harus salah satu kandidat yang punya token —
+     * bukan gateway yang tidak dikonfigurasi.
+     */
+    public function testProviderNameWithAutoPicksFromConfiguredGateways(): void
+    {
+        self::fakeEnv([
+            'WHATSAPP_PROVIDER' => 'Auto',
+            'WHATSAPP_TOKEN_Wuzapi' => 'k1',
+            'WHATSAPP_TOKEN_OpenWA' => 'k2',
+        ]);
+
+        $client = new Client();
+        $nama = $client->providerName();
+
+        self::assertContains($nama, ['Wuzapi', 'OpenWA']);
+    }
+
+    public function testProviderNameRejectsUnknownGateway(): void
+    {
+        $this->expectException(UnknownProviderException::class);
+        $this->expectExceptionMessage('NopeApi');
+
+        (new Client(['provider' => 'NopeApi']))->providerName();
+    }
+
+    public function testProviderNameRejectsUnsetProvider(): void
+    {
+        self::fakeEnv([]);
+
+        $this->expectException(ConfigurationException::class);
+
+        (new Client())->providerName();
+    }
+
+    public function testProviderNameWithAutoWithoutCandidatesIsRejected(): void
+    {
+        self::fakeEnv(['WHATSAPP_PROVIDER' => 'Auto']);
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessage('WHATSAPP_PROVIDER \'auto\' tidak punya kandidat');
+
+        (new Client())->providerName();
+    }
+
     public function testResolvesProviderFromEnvironment(): void
     {
         self::fakeEnv(['WHATSAPP_PROVIDER' => 'Wuzapi']);

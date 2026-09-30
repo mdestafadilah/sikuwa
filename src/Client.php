@@ -117,6 +117,69 @@ final class Client
         return $names;
     }
 
+    /**
+     * Nama gateway yang akan dipakai, tanpa membangun instance-nya.
+     *
+     * Bedanya dengan {@see self::provider()} hanya pada hasilnya: yang ini
+     * mengembalikan **nama**, bukan objeknya, sehingga aman dipanggil untuk
+     * sekadar mencatat ke log.
+     *
+     * Perlu diingat bahwa `provider = auto` mengundi **setiap kali** dipanggil,
+     * jadi nama yang dikembalikan method ini tidak selalu sama dengan gateway
+     * yang dipakai `send()` berikutnya. Untuk mengunci pilihan, bangun gateway
+     * sekali lalu simpan:
+     *
+     * ```php
+     * $gateway = $client->provider();          // undian terjadi di sini
+     * $nama    = $gateway->getProvider();      // "OpenWA"
+     * $gateway->sendMessage($pesan);           // pasti lewat OpenWA
+     * ```
+     *
+     * @param string|null $name Nama gateway, atau `auto`. Default dari konfigurasi.
+     *
+     * @throws UnknownProviderException
+     * @throws ConfigurationException
+     */
+    public function providerName(?string $name = null): string
+    {
+        $name ??= $this->config->provider();
+
+        if ($name === null || $name === '') {
+            throw new ConfigurationException(
+                'WHATSAPP_PROVIDER belum diisi, dan tidak ada nama provider yang diberikan'
+            );
+        }
+
+        if (strcasecmp($name, self::AUTO) === 0) {
+            return $this->pickAuto();
+        }
+
+        // Lewat resolve() supaya nama yang tidak dikenal tetap ditolak dengan
+        // pesan yang sama seperti provider() — bukan diteruskan apa adanya.
+        self::resolve($name);
+
+        return self::canonical($name);
+    }
+
+    /**
+     * Ejaan resmi sebuah nama gateway, apa pun huruf besar-kecilnya.
+     *
+     * Dipakai supaya `provider_name()` mengembalikan `OpenWA`, bukan `openwa`
+     * yang kebetulan diketik pemanggil — nama itu biasanya langsung dicatat ke
+     * log atau ditampilkan, jadi ejaannya harus seragam.
+     */
+    private static function canonical(string $name): string
+    {
+        foreach (array_keys(self::PROVIDERS) as $candidate) {
+            if (strcasecmp($candidate, $name) === 0) {
+                return $candidate;
+            }
+        }
+
+        // Tidak mungkin tercapai: resolve() sudah menolak nama asing sebelumnya.
+        return $name;
+    }
+
     public function config(): Config
     {
         return $this->config;

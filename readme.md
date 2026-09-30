@@ -420,13 +420,28 @@ try {
 gateway yang belum dikonfigurasi.
 
 ```php
-Client::configured();   // mis. ['OpenWA', 'Wuzapi']
-$client->provider();    // instance gateway terpilih
+Client::configured();      // mis. ['OpenWA', 'Wuzapi']
+$client->providerName();   // 'OpenWA' — nama saja, tanpa membangun objek
+$client->provider();       // instance gateway terpilih
 ```
 
 `provider()` mengembalikan instance baru setiap dipanggil. Untuk `Auto` itu
 berarti undiannya diulang — panggil sekali lalu simpan hasilnya kalau beberapa
 pesan harus lewat gateway yang sama.
+
+Perhatikan bahwa `send()` memanggil `provider()` sendiri, jadi pada mode `Auto`
+pesan berurutan bisa mendarat di gateway yang berbeda. Untuk mengetahui **dan
+mengunci** siapa pengirimnya, jangan pakai `send()`:
+
+```php
+$gateway = $client->provider();            // undian terjadi di sini, sekali
+$nama    = $gateway->getProvider();        // 'OpenWA'
+
+$gateway->sendMessage($pesan);             // pasti lewat OpenWA
+```
+
+`providerName()` berguna untuk mencatat ke log atau memeriksa konfigurasi; ia
+sendiri **tidak** mengunci pilihan, karena tiap pemanggilan mengundi ulang.
 
 ## Sesi
 
