@@ -406,21 +406,31 @@ abstract class AbstractProvider implements Whatsapp
         //   ['pacing' => [...], [...], [...]]          (kunci di samping daftar)
         $override = self::setting($message, 'pacing', "['cycle' => '0,30', 'interval' => '20-30']");
         $typingOverride = self::setting($message, 'typing', "['speed' => 8, 'max' => 30]");
+        $throttleOverride = self::setting($message, 'throttle', "['max' => 50, 'window' => 60]");
 
         if (isset($message['messages']) && \is_array($message['messages'])) {
             $message = $message['messages'];
         }
 
         // Dibuang supaya tidak ikut terbaca sebagai pesan pada bentuk daftar.
-        unset($message['pacing'], $message['typing']);
+        unset($message['pacing'], $message['typing'], $message['throttle']);
 
         $pacing = $this->config->pacing()->merge($override);
         $typing = $this->config->typing()->merge($typingOverride);
+        $throttle = $this->config->throttle()->merge($throttleOverride);
 
         // Bulk kalau elemen pertama sendiri berupa array pesan.
         $isBulk = isset($message[0]) && \is_array($message[0]);
         $messages = $isBulk ? $message : [$message];
         $items = [];
+
+        // Jatah laju dijadwalkan untuk seluruh batch sekaligus, karena jumlah
+        // pesan hanya diketahui di sini. Hasilnya digabung dengan jeda pacing
+        // secara maksimum, bukan penjumlahan: keduanya sama-sama menahan
+        // pemanggil, dan menunggu 60 detik penuh untuk tiap pesan saat kedua
+        // aturan aktif hanya akan membuat pengirimannya jauh lebih lambat
+        // daripada yang diminta pemanggil.
+        $launch = $throttle->schedule(\count($messages));
 
         foreach ($messages as $i => $item) {
             if (! \is_array($item) || ! isset($item['destination'], $item['message'])) {
@@ -443,9 +453,10 @@ abstract class AbstractProvider implements Whatsapp
                 'message' => $text,
                 // Urutan siklus mengikuti posisi di daftar, bukan kunci asli
                 // pemanggil — daftar bisa datang dengan kunci yang bolong.
+                // Angka yang disebut pemanggil selalu menang atas kedua aturan.
                 'delay' => isset($item['delay'])
                     ? max(0, (int) $item['delay'])
-                    : $pacing->delayFor(\count($items), $length),
+                    : self::combine($pacing->delayFor(\count($items), $length), $launch[\count($items)] ?? null),
                 // Lama indikator ketik juga bergantung pada panjang isi pesan,
                 // jadi ia diselesaikan di sini bersama jeda — satu-satunya
                 // titik di mana isi pesan masih berupa teks.
@@ -454,6 +465,115 @@ abstract class AbstractProvider implements Whatsapp
         }
 
         return $items;
+    }
+
+    /**
+     * Gabungkan jeda dari pacing dan pembatas laju, dengan `null` berarti
+     * "aturan ini tidak aktif".
+     *
+     * Keduanya sama-sama menahan pemanggil, jadi yang diambil adalah yang
+     * **lebih panjang** — bukan jumlahnya. Menjumlahkan berarti menunggu dua
+     * kali ketika kedua aturan aktif, dan itu lebih lambat daripada yang
+     * diminta pemanggil.
+     *
+     * Null tetap null: itulah penanda "tidak ada aturan", yang membuat gateway
+     * memakai jeda bawaannya sendiri. Mengubahnya menjadi 0 akan mengubah
+     * perilaku gateway — nol berarti "jangan tunggu", bukan "terserah gateway".
+     */
+    private static function combine(?int $pacing, ?int $throttle): ?int
+    {
+        if ($pacing === null) {
+            return $throttle;
+        }
+
+        if ($throttle === null) {
+            return $pacing;
+        }
+
+        return max($pacing, $throttle);
+    }
+
+    /**
+     * Nomor tujuan yang muncul lebih dari sekali dalam satu batch.
+     *
+     * Mengirim beberapa pesan ke satu nomor dalam waktu singkat adalah pola
+     * yang paling cepat memicu pemblokiran — jauh lebih cepat daripada
+     * mengirim satu pesan ke banyak nomor. WhatsApp sendiri menandai pengirim
+     * yang "menembak" satu tujuan berulang sebagai spam.
+     *
+     * Yang dikembalikan hanya tujuannya, bukan isi pesannya, supaya aman
+     * dicatat ke log. Dihitung sekali per panggilan, bukan per pesan.
+     *
+     * ```php
+     * $gateway = $client->provider();
+     * $ulang = $gateway->repeatedTargets($pesan);   // ['081234567890']
+     * ```
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>>|string $message
+     *        Bentuk pesan yang sama seperti `sendMessage()`.
+     * @return array<int,string> Daftar tujuan yang berulang; kosong bila tidak ada.
+     */
+    public function repeatedTargets(array|string $message): array
+    {
+        if (\is_string($message)) {
+            return [];
+        }
+
+        if (isset($message['messages']) && \is_array($message['messages'])) {
+            $message = $message['messages'];
+        }
+
+        // Bentuk satu pesan tidak punya arti "berulang".
+        if (! isset($message[0]) || ! \is_array($message[0])) {
+            return [];
+        }
+
+        $counts = [];
+
+        foreach ($message as $item) {
+            if (! \is_array($item) || ! isset($item['destination'])) {
+                continue;
+            }
+
+            $destination = trim((string) $item['destination']);
+
+            if ($destination !== '') {
+                $counts[$destination] = ($counts[$destination] ?? 0) + 1;
+            }
+        }
+
+        return array_keys(array_filter($counts, static fn (int $n): bool => $n > 1));
+    }
+
+    /**
+     * Peringatkan bila satu batch mengirim ke nomor yang sama lebih dari sekali.
+     *
+     * Sengaja **tidak** dipanggil dari jalur kirim. Mengirim dua pesan ke satu
+     * orang adalah hal yang sah — mis. teks lalu berkas — dan SDK ini tidak
+     * punya logger, sehingga peringatan otomatis hanya akan muncul sebagai
+     * notice PHP yang tidak bisa ditangkap pemanggil dengan rapi. Pemanggil
+     * yang ingin memeriksanya memanggil {@see self::repeatedTargets()} sendiri
+     * dan memutuskan apa yang pantas dilakukan.
+     *
+     * @param array<int,array<string,mixed>> $messages
+     */
+    protected function warnAboutRepeatedTargets(array $messages): void
+    {
+        $ulang = $this->repeatedTargets($messages);
+
+        if ($ulang === []) {
+            return;
+        }
+
+        trigger_error(
+            sprintf(
+                '%s: nomor berikut menerima lebih dari satu pesan dalam satu panggilan: %s. '
+                . 'Pola ini paling cepat memicu pemblokiran WhatsApp.',
+                $this->getProvider(),
+                implode(', ', $ulang)
+            ),
+            E_USER_NOTICE
+        );
     }
 
     /**

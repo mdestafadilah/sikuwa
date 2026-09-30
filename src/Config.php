@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Sikuwa\Whatsapp;
 
 use Sikuwa\Whatsapp\Support\Pacing;
+use Sikuwa\Whatsapp\Support\Throttle;
 use Sikuwa\Whatsapp\Support\Typing;
 
 /**
@@ -26,7 +27,8 @@ use Sikuwa\Whatsapp\Support\Typing;
  * `WHATSAPP_ACCOUNT_TOKEN`, `WHATSAPP_TIMEOUT`, `WHATSAPP_PACING_CYCLE`,
  * `WHATSAPP_PACING_INTERVAL`, `WHATSAPP_PACING_LONG_CHARS`,
  * `WHATSAPP_PACING_LONG_FACTOR`, `WHATSAPP_TYPING`, `WHATSAPP_TYPING_SPEED`,
- * `WHATSAPP_TYPING_MIN`, `WHATSAPP_TYPING_MAX`.
+ * `WHATSAPP_TYPING_MIN`, `WHATSAPP_TYPING_MAX`, `WHATSAPP_THROTTLE_MAX`,
+ * `WHATSAPP_THROTTLE_WINDOW`.
  */
 final class Config
 {
@@ -70,7 +72,8 @@ final class Config
         private array $urls = [],
         private ?string $accountToken = null,
         private ?Pacing $pacing = null,
-        private ?Typing $typing = null
+        private ?Typing $typing = null,
+        private ?Throttle $throttle = null
     ) {
     }
 
@@ -90,7 +93,8 @@ final class Config
      *     }|Pacing,
      *     typing?:array{
      *         enabled?:mixed, speed?:string|int, min?:string|int, max?:string|int
-     *     }|Typing
+     *     }|Typing,
+     *     throttle?:array{max?:string|int, window?:string|int}|Throttle
      * }|Config|null $options
      */
     public static function from(array|Config|null $options): self
@@ -116,6 +120,7 @@ final class Config
             accountToken: $options['account_token'] ?? null,
             pacing: self::pacingOption($options['pacing'] ?? null),
             typing: self::typingOption($options['typing'] ?? null),
+            throttle: self::throttleOption($options['throttle'] ?? null),
         );
     }
 
@@ -132,6 +137,7 @@ final class Config
             accountToken: self::env('WHATSAPP_ACCOUNT_TOKEN'),
             pacing: self::pacingFromEnv(),
             typing: self::typingFromEnv(),
+            throttle: self::throttleFromEnv(),
         );
     }
 
@@ -197,6 +203,36 @@ final class Config
         }
 
         return \is_array($value) ? Typing::fromArray($value) : null;
+    }
+
+    /**
+     * Throttle dari environment.
+     *
+     * Dikumpulkan di satu tempat seperti {@see self::pacingFromEnv()}, supaya
+     * dua jalur yang memakainya tidak bisa berbeda diam-diam saat kuncinya
+     * bertambah.
+     */
+    private static function throttleFromEnv(): Throttle
+    {
+        return Throttle::fromConfig(
+            self::env('WHATSAPP_THROTTLE_MAX'),
+            self::env('WHATSAPP_THROTTLE_WINDOW')
+        );
+    }
+
+    /**
+     * Terima opsi `throttle` dalam bentuk objek jadi maupun array mentah.
+     *
+     * @return Throttle|null Null bila pemanggil tidak mengirim apa pun, supaya
+     *                       {@see self::throttle()} masih bisa jatuh ke environment.
+     */
+    private static function throttleOption(mixed $value): ?Throttle
+    {
+        if ($value instanceof Throttle) {
+            return $value;
+        }
+
+        return \is_array($value) ? Throttle::fromArray($value) : null;
     }
 
     /**
@@ -419,6 +455,27 @@ final class Config
     public function typing(): Typing
     {
         return $this->typing ?? self::typingFromEnv();
+    }
+
+    /**
+     * Pembatas laju pengiriman: berapa pesan boleh keluar per jendela waktu.
+     *
+     * Melengkapi {@see self::pacing()}, yang hanya mengatur jeda **antar** pesan
+     * di dalam satu batch. Pacing tidak melihat aplikasi yang mengirim satu
+     * pesan per request — dan justru pola itulah yang paling sering dipakai,
+     * sekaligus yang paling mudah menembak terlalu cepat tanpa disadari.
+     *
+     * Sama seperti pacing dan typing, bawaannya **mati**: selama
+     * `WHATSAPP_THROTTLE_MAX` kosong, tidak ada yang berubah dari sebelumnya.
+     * Pembatas yang aktif tapi salah nilainya akan menahan pemanggil, jadi ia
+     * harus dinyalakan dengan sengaja.
+     *
+     * Nilai eksplisit di konstruktor menang utuh atas environment — tidak
+     * digabung sebagian, sama seperti `token` dan `url`.
+     */
+    public function throttle(): Throttle
+    {
+        return $this->throttle ?? self::throttleFromEnv();
     }
 
     /**

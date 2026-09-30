@@ -310,6 +310,55 @@ Karena jedanya dititipkan ke server, Fonnte, OpenWA, dan Evolution API tidak
 menahan klien dua kali. OpenWA juga menambahkan pengacakan di sisinya sendiri
 (`randomizeDelay`).
 
+### Pagar laju (warmup)
+
+Pacing menyusun jeda dari isi pesan; pagar laju menyusunnya dari **posisi**.
+Akun yang baru dipakai mengirim 200 pesan dalam semenit lebih mencurigakan
+daripada akun yang mengirim 200 pesan sepanjang satu jam — berapa pun panjang
+teksnya. Pagar laju menaruh batas keras: paling banyak sekian pesan per sekian
+detik.
+
+| Kunci | Arti |
+| --- | --- |
+| `WHATSAPP_THROTTLE_MAX` | Jumlah pesan yang boleh dikirim per jendela |
+| `WHATSAPP_THROTTLE_WINDOW` | Panjang satu jendela, detik |
+
+Aturannya berbasis posisi: pesan ke-1 sampai ke-`MAX` masuk jendela pertama dan
+tidak ditunggu, pesan `MAX+1` sampai `2×MAX` menunggu satu jendela penuh, `2×MAX+1`
+sampai `3×MAX` menunggu dua jendela, dan seterusnya. Jadi posisi ke-`i`
+(berbasis nol) menunggu `⌊i ÷ MAX⌋ × WINDOW` detik. Jeda yang sangat panjang
+dijepit di 600 detik (10 menit) supaya satu batch besar tidak membekukan proses
+pemanggil selama berjam-jam.
+
+Bawaannya **mati**. Seperti pacing, ia menahan proses pemanggil, jadi nyalakan
+dengan sadar — dan pilih `MAX`/`WINDOW` sesuai umur akun, bukan langsung ke angka
+"aman" yang besar.
+
+```php
+// Paling banyak 20 pesan per 60 detik:
+//   posisi 0..19  -> 0 detik
+//   posisi 20..39 -> 60 detik
+//   posisi 40..59 -> 120 detik
+```
+
+Untuk satu panggilan saja, sertakan kunci `throttle`:
+
+```php
+$client->send([
+    'messages' => [ /* ... */ ],
+    'throttle' => ['max' => 10, 'window' => 30],
+]);
+```
+
+**Pacing dan pagar laju boleh dipakai bersamaan.** Yang diambil bukan
+penjumlahan keduanya, melainkan yang **terbesar** — tujuannya sama (memberi napas
+antar pesan), dan menjumlahkannya cuma membuat batch selesai dua kali lebih lambat
+tanpa manfaat tambahan. Jadi bila pacing menuntut 30 detik untuk pesan ke-3
+sementara pagar laju menuntut 60 detik, jedanya 60 detik, bukan 90.
+
+Perhatikan bahwa `delay` eksplisit pada satu pesan **tetap menang** atas keduanya
+untuk pesan itu — sama seperti perilakunya terhadap pacing.
+
 ### Indikator mengetik otomatis
 
 `sendTyping()` di atas eksplisit — pemanggil yang memanggilnya. Kalau ingin
@@ -645,6 +694,8 @@ Lihat [`.env.example`](.env.example). Ringkasnya:
 | `WHATSAPP_TYPING_SPEED` | Kecepatan ketik, karakter per detik (default 15) |
 | `WHATSAPP_TYPING_MIN` | Lama indikator tampil paling singkat, detik (default 2) |
 | `WHATSAPP_TYPING_MAX` | Lama indikator tampil paling lama, detik (default 20) |
+| `WHATSAPP_THROTTLE_MAX` | Batas jumlah pesan per jendela (warmup). Kosong = pagar laju mati |
+| `WHATSAPP_THROTTLE_WINDOW` | Panjang satu jendela pagar laju, detik |
 
 ### URL per gateway
 
@@ -736,6 +787,44 @@ Nama provider ditulis apa adanya mengikuti kunci per-provider yang sudah ada
   Seluruh error-nya berbentuk `{"success":false,"error":{"code":N,"message":"…"}}`,
   dengan HTTP 503 untuk sesi yang belum tersambung.
 
+## Menghindari diblokir WhatsApp
+
+WhatsApp memblokir nomor karena **pola pengirimannya**, bukan karena SDK yang
+dipakai. Karena itu tidak ada saklar ajaib di sini: yang ada adalah alat untuk
+membentuk pola yang wajar, dan sisanya tanggung jawab pemanggil. Bagian ini
+menjelaskan mana yang dikerjakan SDK dan mana yang tidak.
+
+Yang **bisa** diatur lewat SDK:
+
+- **Jeda antar pesan** — `WHATSAPP_PACING_*`. Jeda tetap bergiliran ditambah
+  jitter acak, dan pesan panjang ditunggu lebih lama.
+- **Pagar laju (warmup)** — `WHATSAPP_THROTTLE_MAX` / `WHATSAPP_THROTTLE_WINDOW`.
+  Batas keras berapa pesan per rentang waktu, cocok untuk akun yang baru mulai.
+- **Indikator "sedang mengetik"** — `WHATSAPP_TYPING`. Pesan datang setelah
+  indikator yang lamanya sepadan dengan panjang teks, bukan seketika.
+- **`delay` eksplisit** pada tiap pesan, bila pemanggil ingin mengatur sendiri.
+
+Yang **tidak** bisa, dan sebaiknya tidak diharapkan dari SDK:
+
+- **Penjadwalan jam kirim.** SDK ini sinkron — ia tidak menunggu jam 9 pagi
+  sebelum mengirim. Aturlah dari pemanggil (cron, queue worker) dan panggil SDK
+  saat itu.
+- **Pemanasan akun.** Warmup sejati berarti mengirim **sedikit** pesan dulu
+  selama beberapa hari lalu menaikkannya perlahan. SDK hanya menegakkan batas
+  yang Anda berikan; angka yang benar untuk akun hari ke-1 berbeda dari hari
+  ke-30, dan itu keputusan pemanggil.
+- **Pemilihan tujuan.** Mengirim ke nomor yang tidak pernah membalas
+  (cold outreach) adalah pemicu blokir yang paling sering, dan SDK tidak bisa
+  membedakan pelanggan dari orang asing.
+- **Percobaan ulang otomatis.** Saat gateway membalas HTTP 429, SDK melempar
+  `RateLimitException` **tanpa** mencoba lagi. Mengulang sendiri tanpa jeda
+  tumbuh justru memperparah. Tangani exception itu, tunggu, lalu ulangi dengan
+  jeda yang lebih panjang.
+
+Jadi urutan yang disarankan: nyalakan pacing, pasang pagar laju yang rendah
+untuk akun baru, kirim dalam jumlah kecil, dan naikkan batasnya hanya setelah
+pola pengiriman terlihat wajar.
+
 ## Error
 
 Semua error melempar subclass dari `Sikuwa\Whatsapp\Exceptions\WhatsappException`:
@@ -793,6 +882,7 @@ yang sudah teruji.
 - [x] Send Media Image
 - [x] Send Media File
 - [x] Human Being Typing (`sendTyping()` eksplisit dan otomatis lewat `WHATSAPP_TYPING`)
+- [x] Pagar laju / warmup (`WHATSAPP_THROTTLE_MAX` & `WHATSAPP_THROTTLE_WINDOW`)
 
 ## Kredit
 

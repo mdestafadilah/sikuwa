@@ -45,6 +45,10 @@ interface Whatsapp
      *        `['messages' => [...], 'pacing' => ['cycle' => '0,30']]`.
      *        Kunci `typing` (`['speed' => 8, 'max' => 30]`) menyalakan
      *        indikator "sedang mengetik" untuk panggilan itu saja.
+     *        Kunci `throttle` (`['max' => 20, 'window' => 60]`) memasang pagar
+     *        laju (warmup) untuk panggilan itu saja; bila pacing juga menyala,
+     *        jeda yang dipakai adalah yang **terbesar** di antara keduanya,
+     *        bukan jumlahnya.
      *
      * @return string Detail hasil yang siap dicatat ke log. Setiap provider
      *                mengawalinya dengan `"Sukses"` supaya pemanggil bisa
