@@ -696,6 +696,7 @@ Lihat [`.env.example`](.env.example). Ringkasnya:
 | `WHATSAPP_TYPING_MAX` | Lama indikator tampil paling lama, detik (default 20) |
 | `WHATSAPP_THROTTLE_MAX` | Batas jumlah pesan per jendela (warmup). Kosong = pagar laju mati |
 | `WHATSAPP_THROTTLE_WINDOW` | Panjang satu jendela pagar laju, detik |
+| `WHATSAPP_RETRIES` | Percobaan ulang otomatis untuk 429/503 yang menyebutkan `Retry-After` (default 0) |
 
 ### URL per gateway
 
@@ -816,14 +817,74 @@ Yang **tidak** bisa, dan sebaiknya tidak diharapkan dari SDK:
 - **Pemilihan tujuan.** Mengirim ke nomor yang tidak pernah membalas
   (cold outreach) adalah pemicu blokir yang paling sering, dan SDK tidak bisa
   membedakan pelanggan dari orang asing.
-- **Percobaan ulang otomatis.** Saat gateway membalas HTTP 429, SDK melempar
-  `RateLimitException` **tanpa** mencoba lagi. Mengulang sendiri tanpa jeda
-  tumbuh justru memperparah. Tangani exception itu, tunggu, lalu ulangi dengan
-  jeda yang lebih panjang.
+
+Perhatikan bahwa percobaan ulang **sudah** ditangani SDK saat gateway
+menyebutkan `Retry-After` — lihat "Percobaan ulang (HTTP 429 & 503)" di bawah.
+Yang tetap jadi tanggung jawab pemanggil adalah **menjadwalkan** ulang batch
+yang gagal, mis. menjalankannya lagi satu jam kemudian.
 
 Jadi urutan yang disarankan: nyalakan pacing, pasang pagar laju yang rendah
 untuk akun baru, kirim dalam jumlah kecil, dan naikkan batasnya hanya setelah
 pola pengiriman terlihat wajar.
+
+## Percobaan ulang (HTTP 429 & 503)
+
+Gateway yang membalas **429** (batas laju) atau **503** (sesi belum tersambung)
+sering menyertakan header `Retry-After` — berapa detik pemanggil sebaiknya
+menunggu. SDK membacanya dan, bila `WHATSAPP_RETRIES` diisi, mengulang
+percobaannya sendiri setelah menunggu selama itu.
+
+| Kunci | Arti |
+| --- | --- |
+| `WHATSAPP_RETRIES` | Berapa kali percobaan ulang per pesan. Bawaannya **0** (mati) |
+
+Dua syarat harus terpenuhi bersamaan, dan itu disengaja:
+
+- **Statusnya aman diulang** — hanya 429 dan 503. `401`/`403`/`404`/`409` tidak
+  akan sembuh kalau diulang: token yang ditolak tetap ditolak. Mengulanginya
+  hanya memperlambat kegagalan yang sudah pasti.
+- **Gateway menyebut berapa lama harus menunggu.** Tanpa `Retry-After`, SDK
+  langsung melempar exception-nya. Menebak jeda sendiri berarti menabrak dinding
+  yang sama lagi, dan pemanggil yang tahu jadwalnya lebih tepat memutuskan.
+
+```php
+// .env: WHATSAPP_RETRIES=2
+// Satu pesan, 2 pesan lain tidak terpengaruh.
+$client->send([
+    ['destination' => '0811111111', 'message' => 'satu'],
+    ['destination' => '0822222222', 'message' => 'dua'],
+]);
+
+// Di balik layar, bila pesan ke-2 kena 429 dengan Retry-After: 5
+//   1. POST pesan 1  -> 200
+//   2. POST pesan 2  -> 429
+//   3. tunggu 5 detik
+//   4. POST pesan 2  -> 200   (berhasil, tidak ada yang hilang)
+//   5. POST pesan 3  -> 200
+```
+
+`Retry-After` diterima dalam dua bentuk — jumlah detik (`30`) maupun tanggal
+HTTP (`Wed, 21 Oct 2026 07:28:00 GMT`). Bentuk tanggal diubah menjadi selisih
+detik dari waktu sekarang.
+
+Bila jatah percobaan habis, exception terakhir dilempar **apa adanya**, dan
+`getRetryAfter()` di dalamnya masih berisi angka dari gateway — jadi pemanggil
+yang menangani batch besar tetap bisa membaca angka itu dan menjadwalkan
+sendiri:
+
+```php
+use Sikuwa\Whatsapp\Exceptions\RateLimitException;
+
+try {
+    $client->send($banyak);
+} catch (RateLimitException $e) {
+    $tunggu = $e->getRetryAfter() ?? 60;   // gateway bisa saja tidak menyebutnya
+    // simpan sisa nomor ke queue, jalankan lagi setelah $tunggu detik
+}
+```
+
+Bawaannya **mati** karena mengulang berarti menahan proses pemanggil lebih lama,
+sama seperti pacing dan pagar laju.
 
 ## Error
 
@@ -833,13 +894,13 @@ Semua error melempar subclass dari `Sikuwa\Whatsapp\Exceptions\WhatsappException
 | --- | --- |
 | `ConfigurationException` | Token/URL/session/instance belum diisi, atau bentuk pesan salah. Tidak akan sembuh kalau diulang |
 | `UnknownProviderException` | Nama gateway tidak dikenali |
-| `ApiException` | Gateway menjawab tapi menolak. Membawa `getStatus()`, `getBody()`, `getErrorKind()` |
+| `ApiException` | Gateway menjawab tapi menolak. Membawa `getStatus()`, `getBody()`, `getErrorKind()`, dan `getRetryAfter()` |
 | `AuthException` | 401 — token ditolak |
 | `ForbiddenException` | 403 — token kurang hak (mis. bukan instance token di ApiMe) |
 | `NotFoundException` | 404 — instance/session tidak ditemukan, atau perangkat Fonnte yang dicari tidak ada di akun |
 | `ConflictException` | 409 — masih ada pengiriman dengan `Idempotency-Key` yang sama |
-| `RateLimitException` | 429 — satu-satunya status yang aman diretry |
-| `ServiceUnavailableException` | 503 — sesi WhatsApp belum siap, tidak ada pesan terkirim |
+| `RateLimitException` | 429 — batas laju gateway. Percobaan ulang otomatis bila `WHATSAPP_RETRIES` diisi dan `Retry-After` tersedia |
+| `ServiceUnavailableException` | 503 — sesi WhatsApp belum siap. Ikut percobaan ulang otomatis dengan syarat yang sama |
 | `TimeoutException` | Request melewati `WHATSAPP_TIMEOUT` |
 
 Pengiriman massal ke gateway tanpa endpoint batch (ApiMe, Evolution API,
@@ -883,6 +944,7 @@ yang sudah teruji.
 - [x] Send Media File
 - [x] Human Being Typing (`sendTyping()` eksplisit dan otomatis lewat `WHATSAPP_TYPING`)
 - [x] Pagar laju / warmup (`WHATSAPP_THROTTLE_MAX` & `WHATSAPP_THROTTLE_WINDOW`)
+- [x] Percobaan ulang otomatis 429/503 dengan menghormati `Retry-After` (`WHATSAPP_RETRIES`)
 
 ## Kredit
 

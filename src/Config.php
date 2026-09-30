@@ -73,7 +73,8 @@ final class Config
         private ?string $accountToken = null,
         private ?Pacing $pacing = null,
         private ?Typing $typing = null,
-        private ?Throttle $throttle = null
+        private ?Throttle $throttle = null,
+        private ?int $retries = null
     ) {
     }
 
@@ -94,7 +95,8 @@ final class Config
      *     typing?:array{
      *         enabled?:mixed, speed?:string|int, min?:string|int, max?:string|int
      *     }|Typing,
-     *     throttle?:array{max?:string|int, window?:string|int}|Throttle
+     *     throttle?:array{max?:string|int, window?:string|int}|Throttle,
+     *     retries?:string|int
      * }|Config|null $options
      */
     public static function from(array|Config|null $options): self
@@ -121,6 +123,7 @@ final class Config
             pacing: self::pacingOption($options['pacing'] ?? null),
             typing: self::typingOption($options['typing'] ?? null),
             throttle: self::throttleOption($options['throttle'] ?? null),
+            retries: isset($options['retries']) ? (int) $options['retries'] : null,
         );
     }
 
@@ -138,6 +141,7 @@ final class Config
             pacing: self::pacingFromEnv(),
             typing: self::typingFromEnv(),
             throttle: self::throttleFromEnv(),
+            retries: self::retriesFromEnv(),
         );
     }
 
@@ -233,6 +237,14 @@ final class Config
         }
 
         return \is_array($value) ? Throttle::fromArray($value) : null;
+    }
+
+    /** Jumlah percobaan ulang otomatis untuk kegagalan yang aman diulang. */
+    private static function retriesFromEnv(): ?int
+    {
+        $value = self::env('WHATSAPP_RETRIES');
+
+        return $value === null || ! is_numeric(trim($value)) ? null : (int) trim($value);
     }
 
     /**
@@ -476,6 +488,26 @@ final class Config
     public function throttle(): Throttle
     {
         return $this->throttle ?? self::throttleFromEnv();
+    }
+
+    /**
+     * Berapa kali SDK boleh mencoba ulang sendiri saat gateway menolak dengan
+     * 429 atau 503.
+     *
+     * Hanya dua status itu yang diulang, dan hanya bila gateway menyebut
+     * `Retry-After`: status lain tidak akan sembuh kalau diulang (token salah,
+     * nomor tidak terdaftar), dan mengulang tanpa tahu berapa lama harus
+     * menunggu hanya menambah beban di dinding yang sama.
+     *
+     * Bawaannya **0** — tanpa percobaan ulang otomatis. Mengulang sendiri
+     * berarti menahan proses pemanggil lebih lama, jadi ia harus dinyalakan
+     * dengan sengaja, sama seperti pacing dan throttle.
+     */
+    public function retries(): int
+    {
+        $configured = $this->retries ?? self::retriesFromEnv();
+
+        return $configured === null ? 0 : max(0, $configured);
     }
 
     /**

@@ -140,6 +140,15 @@ final class HttpExecutor
             return new HttpResponse(0, null, $e->getMessage());
         }
 
-        return new HttpResponse($response->getStatusCode(), (string) $response->getBody());
+        return new HttpResponse(
+            $response->getStatusCode(),
+            (string) $response->getBody(),
+            '',
+            false,
+            // Diambil di sini karena inilah satu-satunya titik yang masih
+            // memegang objek respons Guzzle; setelah ini provider hanya
+            // melihat HttpResponse.
+            $response->getHeaderLine('Retry-After') !== '' ? $response->getHeaderLine('Retry-After') : null
+        );
     }
 }

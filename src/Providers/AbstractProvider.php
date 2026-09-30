@@ -647,6 +647,10 @@ abstract class AbstractProvider implements Whatsapp
     /**
      * Lempar exception bertipe untuk respons non-2xx.
      *
+     * `Retry-After` ikut diteruskan supaya 429 membawa sendiri berapa lama
+     * pemanggil harus menunggu — hanya di sinilah header respons masih
+     * terlihat, setelah ini yang beredar hanya exception.
+     *
      * @param array<string,mixed>|null $body
      */
     protected function reject(HttpResponse $response, ?array $body): never
@@ -655,7 +659,9 @@ abstract class AbstractProvider implements Whatsapp
             $response->status,
             $this->describe($response->status, $body),
             $body,
-            $this->kind($body)
+            $this->kind($body),
+            null,
+            $response->retryAfterSeconds()
         );
     }
 
@@ -769,6 +775,63 @@ abstract class AbstractProvider implements Whatsapp
     }
 
     /**
+     * Jalankan `$attempt`, dan ulangi bila gateway menolak dengan status yang
+     * aman diulang dan menyebutkan `Retry-After`.
+     *
+     * Dua syarat harus terpenuhi sekaligus:
+     *
+     * - **Statusnya aman diulang** — 429 (batas laju) atau 503 (sesi belum
+     *   siap). 401/403/404/409 tidak akan sembuh kalau diulang: token yang
+     *   ditolak tetap ditolak, jadi mengulangnya hanya memperlambat kegagalan
+     *   yang sudah pasti.
+     * - **Gateway menyebut berapa lama harus menunggu.** Tanpa `Retry-After`,
+     *   menebak jeda sendiri berarti menabrak dinding yang sama lagi; yang
+     *   seperti itu lebih baik diserahkan ke pemanggil, yang tahu jadwalnya.
+     *
+     * Dijeda dengan {@see self::pause()} supaya test tidak benar-benar menunggu.
+     * Bila percobaan terakhir tetap gagal, exception terakhir dilempar apa
+     * adanya — pesannya sudah memuat `Retry-After`, jadi pemanggil tetap bisa
+     * mengatur ulang jadwalnya sendiri.
+     *
+     * @param callable():mixed $attempt
+     *
+     * @throws WhatsappException
+     */
+    protected function withRetry(callable $attempt): mixed
+    {
+        $sisa = $this->config->retries();
+
+        while (true) {
+            try {
+                return $attempt();
+            } catch (ApiException $e) {
+                $tunggu = $e->getRetryAfter();
+
+                if ($sisa <= 0 || $tunggu === null || ! self::isRetryableStatus($e->getStatus())) {
+                    throw $e;
+                }
+
+                $sisa--;
+                $this->pause($tunggu);
+            }
+        }
+    }
+
+    /**
+     * Status HTTP yang aman diulang: 429 dan 503.
+     *
+     * Dua ini satu-satunya yang menandakan keadaan **sementara** — batas laju
+     * yang akan lewat, dan sesi yang belum tersambung. Status 5xx lain
+     * (mis. 500) sengaja tidak ikut: bug di sisi gateway biasanya tidak sembuh
+     * dalam hitungan detik, dan mengulanginya berkali-kali justru menambah
+     * beban.
+     */
+    private static function isRetryableStatus(int $status): bool
+    {
+        return $status === 429 || $status === 503;
+    }
+
+    /**
      * Kirim beberapa pesan satu per satu, dengan jeda di antara pengiriman.
      *
      * Dipakai gateway tanpa endpoint batch (ApiMe, Evolution API, wuzapi).
@@ -816,7 +879,7 @@ abstract class AbstractProvider implements Whatsapp
             $this->announceTyping($item);
 
             try {
-                $send($item['message']);
+                $this->withRetry(fn () => $send($item['message']));
                 $sukses++;
             } catch (WhatsappException $e) {
                 $terakhir = $e;
@@ -983,7 +1046,10 @@ abstract class AbstractProvider implements Whatsapp
         if (\count($prepared) === 1) {
             $this->announceTyping($prepared[0]);
 
-            return $send($prepared[0]['message']);
+            // Lewat withRetry() juga: satu pesan adalah kasus paling sering
+            // dipakai, jadi justru di situ percobaan ulang paling terasa.
+            // sendSequentially() di bawah punya jalurnya sendiri.
+            return $this->withRetry(fn (): string => $send($prepared[0]['message']));
         }
 
         return $this->sendSequentially($prepared, $send, $label);

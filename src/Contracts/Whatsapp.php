@@ -57,6 +57,9 @@ interface Whatsapp
      * @throws \Sikuwa\Whatsapp\Exceptions\WhatsappException Bila pesan gagal
      *         dikirim. Pakai {@see \Sikuwa\Whatsapp\Client::notify()} kalau
      *         pemanggil lebih suka menerima string alih-alih exception.
+     *         Khusus 429 dan 503, provider mencoba ulang sendiri sebanyak
+     *         `WHATSAPP_RETRIES` bila gateway menyertakan `Retry-After`;
+     *         exception hanya dilempar setelah jatah itu habis.
      */
     public function sendMessage(array|string $message): string;
 
