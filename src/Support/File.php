@@ -29,6 +29,21 @@ final class File
     /** Dipakai kalau jenis berkas sama sekali tidak bisa dikenali. */
     public const DEFAULT_MIME = 'application/octet-stream';
 
+    /**
+     * Batas ukuran media yang diterima WhatsApp, dalam byte (16 MB).
+     *
+     * Angka ini milik WhatsApp, bukan milik gateway — Fonnte, OpenWA, dan
+     * lainnya hanya meneruskan. Karena itu batasnya dipasang di sini sekali,
+     * bukan di tujuh provider: berkas yang ditolak WhatsApp akan ditolak sama
+     * di gateway mana pun.
+     *
+     * Sengaja dipakai sebagai peringatan dini, bukan larangan: WhatsApp bisa
+     * mengubah batasnya tanpa memberi tahu, jadi SDK memeriksa **di sisi
+     * pemanggil** supaya kegagalannya cepat dan jelas, bukan setelah seluruh
+     * berkas terunggah.
+     */
+    public const WHATSAPP_MAX_BYTES = 16 * 1024 * 1024;
+
     /** Penanda awal bagian base64 pada sebuah data URI. */
     private const MARKER = 'base64,';
 
@@ -190,6 +205,85 @@ final class File
         }
 
         return $decoded;
+    }
+
+    /**
+     * Ukuran isi berkas dalam byte, setelah base64-nya diterjemahkan.
+     *
+     * Null bila ukurannya memang tidak bisa diketahui: isinya berupa URL
+     * publik (yang diunduh gateway, bukan SDK) atau base64 yang rusak. Null
+     * di sini berarti "tidak tahu", bukan "nol" — pemanggil yang memeriksa
+     * batas ukuran harus memperlakukan keduanya berbeda.
+     *
+     * Dihitung dari panjang base64, bukan dengan mendekode isinya, supaya
+     * berkas 30 MB tidak perlu disalin ke memori hanya untuk ditolak.
+     */
+    public function size(): ?int
+    {
+        if ($this->isUrl()) {
+            return null;
+        }
+
+        $base64 = $this->base64();
+
+        // Spasi dan baris baru diabaikan decoder base64 (base64 MIME
+        // membungkus isinya tiap 76 kolom), jadi dibuang sebelum dihitung.
+        $clean = preg_replace('/\s+/', '', $base64) ?? '';
+
+        if ($clean === '') {
+            return null;
+        }
+
+        // Base64 meng-encode tiap 3 byte menjadi 4 karakter, dan `=` menandai
+        // grup terakhir yang tidak penuh. Karena itu panjangnya dibagi 4 dulu
+        // (menghasilkan jumlah grup), baru dikali 3, lalu padding dikurangi --
+        // urutan sebaliknya (mengurangi padding dulu, baru dikali) meleset
+        // beberapa byte dan nyaris tak terlihat sampai ada berkas yang persis
+        // di batas ukuran.
+        $padding = \strlen($clean) - \strlen(rtrim($clean, '='));
+
+        return intdiv(\strlen($clean), 4) * 3 - $padding;
+    }
+
+    /**
+     * Apakah berkas ini melebihi batas ukuran yang diberikan.
+     *
+     * Ukuran yang tidak diketahui (URL publik, base64 rusak) **tidak**
+     * dianggap melebihi batas: menolak berkas yang belum tentu besar akan
+     * menggagalkan pengiriman yang sebenarnya sah. Untuk berkas dari URL,
+     * tanggung jawab ukurannya ada di pemanggil.
+     *
+     * @param int $limit Batas dalam byte; bawaannya batas WhatsApp.
+     */
+    public function exceedsLimit(int $limit = self::WHATSAPP_MAX_BYTES): bool
+    {
+        $size = $this->size();
+
+        return $size !== null && $size > $limit;
+    }
+
+    /** Ukuran yang bisa dibaca manusia, mis. `2.4 MB`. Kosong bila tak diketahui. */
+    public function readableSize(): string
+    {
+        $size = $this->size();
+
+        if ($size === null) {
+            return '';
+        }
+
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $value = (float) $size;
+        $unit = 0;
+
+        while ($value >= 1024 && $unit < \count($units) - 1) {
+            $value /= 1024;
+            $unit++;
+        }
+
+        // Satu angka di belakang koma sampai MB, tanpa desimal untuk byte —
+        // "1536 B" lebih terbaca daripada "1.5 KB" saat nilainya kecil.
+        return ($unit === 0 ? (string) (int) $value : number_format($value, 1))
+            . ' ' . $units[$unit];
     }
 
     /** Jenis berkas yang disebut sebuah data URI, bila isinya memang data URI. */

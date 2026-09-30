@@ -443,6 +443,53 @@ final class MediaTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // Batas ukuran
+    // ---------------------------------------------------------------------
+
+    public function testOversizedMediaIsRejectedBeforeAnyRequestIsSent(): void
+    {
+        $backend = new MockBackend([]);
+        $provider = $this->fonnte($backend);
+
+        // 17 MB melebihi batas WhatsApp. Memeriksanya setelah unggahan selesai
+        // berarti pemanggil menunggu lama hanya untuk kegagalan yang sudah
+        // bisa diketahui sejak awal.
+        $besar = 'data:application/pdf;base64,' . base64_encode(random_bytes(17 * 1024 * 1024));
+
+        try {
+            $provider->sendFile([
+                'destination' => '081234567890',
+                'media' => $besar,
+                'filename' => 'laporan.pdf',
+            ]);
+            self::fail('Berkas di atas batas seharusnya ditolak');
+        } catch (ConfigurationException $e) {
+            self::assertStringContainsString('melebihi batas WhatsApp 16 MB', $e->getMessage());
+            self::assertStringContainsString('laporan.pdf', $e->getMessage());
+            self::assertStringContainsString('17.0 MB', $e->getMessage());
+        }
+
+        self::assertSame(0, $backend->count(), 'Tidak boleh ada request sebelum ukurannya diperiksa');
+    }
+
+    public function testMediaAtTheLimitStillGoesOut(): void
+    {
+        $backend = new MockBackend([MockBackend::json(['status' => true])]);
+        $provider = $this->fonnte($backend);
+
+        $tepat = 'data:application/pdf;base64,' . base64_encode(random_bytes(16 * 1024 * 1024));
+
+        $hasil = $provider->sendFile([
+            'destination' => '081234567890',
+            'media' => $tepat,
+            'filename' => 'pas.pdf',
+        ]);
+
+        self::assertStringContainsString('Sukses', $hasil);
+        self::assertSame(1, $backend->count(), 'Tepat 16 MB masih harus dikirim');
+    }
+
+    // ---------------------------------------------------------------------
     // Penolong
     // ---------------------------------------------------------------------
 

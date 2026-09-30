@@ -120,4 +120,84 @@ final class FileTest extends TestCase
 
         File::from('   ');
     }
+
+    // -- Ukuran berkas ---------------------------------------------------
+
+    /**
+     * Ukuran harus persis, apa pun panjang isinya.
+     *
+     * Dihitung dari panjang base64, jadi panjang yang tidak habis dibagi 3
+     * (yang menghasilkan padding `=`) adalah kasus yang paling mudah salah —
+     * itulah sebabnya daftar ini memuat 1, 2, 4, dan 100 byte, bukan hanya
+     * angka bulat yang enak dibagi.
+     */
+    public function testSizeIsExactForEveryPayloadLength(): void
+    {
+        foreach ([1, 2, 3, 4, 5, 100, 1023, 1024, 1025, 70000] as $expected) {
+            $raw = random_bytes($expected);
+            $base64 = base64_encode($raw);
+
+            self::assertSame(
+                $expected,
+                File::from('data:application/octet-stream;base64,' . $base64, 'x.bin')->size(),
+                "Ukuran salah untuk isi {$expected} byte lewat data URI"
+            );
+
+            self::assertSame(
+                $expected,
+                File::from($base64, 'x.bin')->size(),
+                "Ukuran salah untuk isi {$expected} byte lewat base64 telanjang"
+            );
+        }
+    }
+
+    public function testSizeIgnoresLineBreaksInWrappedBase64(): void
+    {
+        // Base64 gaya MIME dibungkus tiap 76 kolom; decoder mengabaikan baris
+        // baru, jadi hitungan ukurannya pun harus mengabaikannya.
+        $raw = random_bytes(1000);
+        $wrapped = chunk_split(base64_encode($raw), 76, "\r\n");
+
+        self::assertSame(1000, File::from('data:application/octet-stream;base64,' . $wrapped, 'x.bin')->size());
+    }
+
+    public function testSizeIsNullWhenItCannotBeKnown(): void
+    {
+        // URL publik diunduh gateway, bukan SDK — ukurannya tidak diketahui,
+        // dan itu berbeda dari nol.
+        self::assertNull(File::from('https://contoh.test/besar.pdf')->size());
+    }
+
+    public function testExceedsLimitComparesAgainstWhatsAppMaximum(): void
+    {
+        $justUnder = File::from('data:application/pdf;base64,' . base64_encode(random_bytes(16 * 1024 * 1024)), 'a.pdf');
+        $justOver = File::from('data:application/pdf;base64,' . base64_encode(random_bytes(16 * 1024 * 1024 + 1)), 'b.pdf');
+
+        self::assertFalse($justUnder->exceedsLimit(), 'Tepat 16 MB masih diterima');
+        self::assertTrue($justOver->exceedsLimit(), 'Satu byte di atas batas sudah ditolak');
+    }
+
+    public function testExceedsLimitAcceptsACustomBoundary(): void
+    {
+        $file = File::from('data:application/pdf;base64,' . base64_encode(random_bytes(2000)), 'a.pdf');
+
+        self::assertTrue($file->exceedsLimit(1000));
+        self::assertFalse($file->exceedsLimit(3000));
+    }
+
+    public function testUnknownSizeIsNeverTreatedAsExceedingTheLimit(): void
+    {
+        // Menolak berkas yang ukurannya belum tentu besar akan menggagalkan
+        // pengiriman yang sebenarnya sah.
+        self::assertFalse(File::from('https://contoh.test/besar.pdf')->exceedsLimit());
+    }
+
+    public function testReadableSizeUsesTheRightUnit(): void
+    {
+        // Isi harus base64 yang sah — 'x' bukan, jadi ukurannya nol.
+        self::assertSame('512 B', File::from(base64_encode(random_bytes(512)), 'a.bin')->readableSize());
+        self::assertSame('2.0 KB', File::from(base64_encode(random_bytes(2048)), 'a.bin')->readableSize());
+        self::assertSame('1.0 MB', File::from(base64_encode(random_bytes(1048576)), 'a.bin')->readableSize());
+        self::assertSame('', File::from('https://contoh.test/a.pdf')->readableSize());
+    }
 }

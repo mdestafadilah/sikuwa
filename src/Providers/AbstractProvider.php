@@ -255,11 +255,22 @@ abstract class AbstractProvider implements Whatsapp
         $filename = $message['filename'] ?? '';
         $caption = $message['caption'] ?? '';
 
-        return $this->sendMedia(
-            trim($destination),
-            File::from($payload, \is_string($filename) ? $filename : ''),
-            \is_string($caption) ? $caption : ''
-        );
+        $file = File::from($payload, \is_string($filename) ? $filename : '');
+
+        // Diperiksa SEBELUM request apa pun dikirim. Kalau tidak, berkas 30 MB
+        // terunggah penuh dulu, baru ditolak WhatsApp dengan pesan yang tidak
+        // menjelaskan apa-apa — dan pemanggil menunggu lama untuk kegagalan
+        // yang bisa diketahui sejak awal. Batasnya milik WhatsApp, bukan
+        // gateway, jadi tempatnya di sini sekali, bukan di tujuh provider.
+        if ($file->exceedsLimit()) {
+            throw new ConfigurationException(
+                "Berkas '{$file->filename}' berukuran {$file->readableSize()}, "
+                . 'melebihi batas WhatsApp 16 MB. Kompres atau perkecil berkasnya '
+                . 'lebih dulu; WhatsApp menolak media sebesar ini apa pun gateway-nya'
+            );
+        }
+
+        return $this->sendMedia(trim($destination), $file, \is_string($caption) ? $caption : '');
     }
 
     public function config(): Config

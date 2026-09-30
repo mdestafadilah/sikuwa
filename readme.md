@@ -187,6 +187,40 @@ Enam hal yang mudah menjebak, dan sudah ditangani SDK:
   `content`. SDK yang menyusun keduanya, jadi satu berkas berteks pengantar
   tetap satu request.
 
+#### Batas ukuran 16 MB
+
+WhatsApp menolak media di atas **16 MB**. SDK memeriksa ukurannya **sebelum**
+request apa pun dikirim, jadi berkas 30 MB gagal seketika dengan pesan yang
+menjelaskan — bukan setelah seluruh isinya terunggah, lalu ditolak gateway
+dengan pesan yang tidak menyebut apa-apa.
+
+```
+ConfigurationException: Berkas 'laporan.pdf' berukuran 17.0 MB, melebihi batas
+WhatsApp 16 MB. Kompres atau perkecil berkasnya lebih dulu; WhatsApp menolak
+media sebesar ini apa pun gateway-nya
+```
+
+Perhatikan bahwa SDK **tidak mengompres** berkasnya untuk Anda. Kompresi
+mengubah data, dan SDK tidak tahu bagian mana yang boleh turun kualitasnya —
+foto bukti transfer yang dikompres sampai tidak terbaca adalah kerusakan yang
+tidak bisa dibatalkan. Ukuran berkasnya bisa diperiksa sendiri lewat API
+publik `File`:
+
+```php
+use Sikuwa\Whatsapp\Support\File;
+
+$file = File::from($base64Pdf, 'laporan.pdf');
+
+$file->size();             // 17825792 — null bila isinya URL publik
+$file->exceedsLimit();     // true — memakai batas WhatsApp 16 MB
+$file->exceedsLimit(1024 * 1024);   // atau batas Anda sendiri
+$file->readableSize();     // "17.0 MB"
+```
+
+Ukuran berkas dari **URL publik** tidak bisa diketahui SDK (yang mengunduhnya
+gateway), jadi `size()` mengembalikan `null` dan `exceedsLimit()` `false` —
+memeriksa `null` lebih dulu bila Anda ingin memperlakukannya berbeda.
+
 ### Indikator "sedang mengetik"
 
 Balasan yang muncul seketika mudah dikenali sebagai robot. `sendTyping()` membuat
@@ -945,6 +979,7 @@ yang sudah teruji.
 - [x] Human Being Typing (`sendTyping()` eksplisit dan otomatis lewat `WHATSAPP_TYPING`)
 - [x] Pagar laju / warmup (`WHATSAPP_THROTTLE_MAX` & `WHATSAPP_THROTTLE_WINDOW`)
 - [x] Percobaan ulang otomatis 429/503 dengan menghormati `Retry-After` (`WHATSAPP_RETRIES`)
+- [x] Periksa ukuran media sebelum kirim (`File::size()`, `exceedsLimit()`, batas WhatsApp 16 MB)
 
 ## Kredit
 
