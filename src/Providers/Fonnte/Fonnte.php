@@ -144,6 +144,41 @@ final class Fonnte extends AbstractProvider
     }
 
     /**
+     * Tampilkan semua perangkat: `POST /get-devices`.
+     *
+     * Memakai **account token** seperti `checkSession()` — bukan token
+     * perangkat. Seluruh perangkat di akun dikembalikan, bukan hanya yang
+     * tokennya sedang aktif.
+     *
+     * @return array<int,Session>
+     *
+     * @throws ApiException
+     * @throws ConfigurationException
+     */
+    public function listSessions(): array
+    {
+        $body = $this->requireStatus(
+            $this->postJson("{$this->deviceBase}/get-devices", null, $this->accountHeaders())
+        );
+
+        $devices = $body['data'] ?? null;
+
+        if (!\is_array($devices)) {
+            return [];
+        }
+
+        $sessions = [];
+
+        foreach ($devices as $device) {
+            if (\is_array($device)) {
+                $sessions[] = FonnteSession::fromDevice($device, $body);
+            }
+        }
+
+        return $sessions;
+    }
+
+    /**
      * Ambil QR perangkat: `POST /qr`.
      *
      * Memakai **token perangkat** (`WHATSAPP_TOKEN`) — berbeda dari

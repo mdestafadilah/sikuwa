@@ -128,6 +128,45 @@ final class Wwebjs extends AbstractProvider
     }
 
     /**
+     * Tampilkan semua session: `GET /session/getSessions`.
+     *
+     * Tidak butuh `WHATSAPP_SESSION` — endpoint ini mendaftar seluruh
+     * session yang dikenal server. Balasannya hanya berisi nama session
+     * (string), tanpa keadaan sambungan, sehingga setiap `Session` hanya
+     * terisi `$id` dan `$provider`. Panggil {@see self::checkSession()}
+     * per session untuk mengetahui keadaannya.
+     *
+     * @return array<int,Session>
+     *
+     * @throws ApiException
+     */
+    public function listSessions(): array
+    {
+        $body = $this->getJson($this->endpoint('session/getSessions'));
+
+        $ids = $body['result'] ?? null;
+
+        if (!\is_array($ids)) {
+            return [];
+        }
+
+        $sessions = [];
+
+        foreach ($ids as $id) {
+            $id = Text::of($id);
+
+            if ($id !== '') {
+                $sessions[] = new Session(
+                    provider: Wwebjs::NAME,
+                    id: $id,
+                );
+            }
+        }
+
+        return $sessions;
+    }
+
+    /**
      * Ambil QR session: `GET /session/qr/{sessionId}/image`.
      *
      * wwebjs menyediakan QR dalam dua bentuk — teks isinya

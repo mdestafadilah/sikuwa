@@ -106,6 +106,23 @@ final class OpenWA extends AbstractProvider
     }
 
     /**
+     * Tampilkan semua sesi: `GET /api/sessions`.
+     *
+     * Tidak butuh `WHATSAPP_SESSION` — endpoint ini mendaftar seluruh sesi
+     * yang dikenal server, bukan satu sesi tertentu.
+     *
+     * @return array<int,Session>
+     *
+     * @throws ApiException
+     */
+    public function listSessions(): array
+    {
+        return OpenWASession::fromListResponse(
+            $this->getJson("{$this->baseUrl}/api/sessions")
+        );
+    }
+
+    /**
      * Ambil QR sesi: `GET /api/sessions/{id}/qr`.
      *
      * Hanya menjawab saat sesi sedang menunggu dipindai. Sesi yang belum

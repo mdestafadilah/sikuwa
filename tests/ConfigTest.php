@@ -353,4 +353,180 @@ final class ConfigTest extends TestCase
             'nol' => ['0', false],
         ];
     }
+
+    // ---------------------------------------------------------------------
+    // Kunci jamak: WHATSAPP_SESSIONS_<Provider> / WHATSAPP_INSTANCES_<Provider>
+    //
+    // Kunci tunggal (WHATSAPP_SESSION_<Provider>) hanya menampung satu sesi
+    // aktif. Kunci jamak menampung DAFTAR sesi yang dikenal aplikasi — mis.
+    // satu server OpenWA dengan sesi "sales", "support", "billing". Inilah
+    // inti fitur "multiple session config di .env": beberapa sesi untuk satu
+    // gateway didaftarkan dalam satu kunci yang dipisah koma.
+    // ---------------------------------------------------------------------
+
+    /**
+     * Kunci jamak WHATSAPP_SESSIONS_<Provider> berisi daftar id sesi yang
+     * dipisah koma. Dibaca apa adanya sebagai array bersih.
+     */
+    public function testProviderSessionsReadsCommaSeparatedListFromEnv(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSIONS_OpenWA' => 'sales,support,billing']);
+
+        self::assertSame(
+            ['sales', 'support', 'billing'],
+            Config::fromEnvironment()->providerSessions('OpenWA')
+        );
+    }
+
+    /**
+     * Spasi di sekitar elemen dipangkas, dan elemen kosong dibuang —
+     * pemanggil yang menulis "sales, support, , billing" tidak mendapat
+     * sesi bernama spasi-kosong yang diam-diam lolos ke URL.
+     */
+    public function testProviderSessionsTrimsWhitespaceAndDropsEmptyElements(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSIONS_OpenWA' => ' sales , support , , billing ']);
+
+        self::assertSame(
+            ['sales', 'support', 'billing'],
+            Config::fromEnvironment()->providerSessions('OpenWA')
+        );
+    }
+
+    /** Tanpa kunci jamak, daftar sesi kosong — bukan null atau error. */
+    public function testProviderSessionsReturnsEmptyArrayWhenKeyAbsent(): void
+    {
+        self::fakeEnv([]);
+
+        self::assertSame([], Config::fromEnvironment()->providerSessions('OpenWA'));
+    }
+
+    /** Kunci jamak tidak pernah jatuh ke kunci umum WHATSAPP_SESSION. */
+    public function testProviderSessionsDoesNotFallBackToSharedSession(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSION' => 'bersama']);
+
+        self::assertSame([], Config::fromEnvironment()->providerSessions('OpenWA'));
+    }
+
+    /**
+     * Opsi `sessions` eksplisit menang atas environment — sama seperti
+     * `tokens` dan `urls`. Dipakai aplikasi yang menyimpan daftar sesi di
+     * tempat lain (mis. database) dan hanya memakai .env untuk kredensial.
+     */
+    public function testSessionsOptionBeatsProviderSessionsEnvironment(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSIONS_OpenWA' => 'dari-env-1,dari-env-2']);
+
+        $config = Config::from(['sessions' => ['OpenWA' => ['dari-opsi-1', 'dari-opsi-2']]]);
+
+        self::assertSame(['dari-opsi-1', 'dari-opsi-2'], $config->providerSessions('OpenWA'));
+    }
+
+    /**
+     * Daftar sesi efektif: kunci jamak dipakai bila ada, selain itu sesi
+     * tunggal dibungkus jadi array satu elemen — sehingga pemanggil yang
+     * hanya punya satu sesi tidak perlu mengubah penulisannya.
+     */
+    public function testSessionsReturnsPluralListOrSingularWrapped(): void
+    {
+        // Jamak dipakai apa adanya.
+        self::fakeEnv(['WHATSAPP_SESSIONS_OpenWA' => 's1,s2']);
+
+        self::assertSame(['s1', 's2'], Config::fromEnvironment()->sessions('OpenWA'));
+
+        // Tanpa jamak, sesi tunggal menjadi satu-satunya elemen.
+        self::fakeEnv(['WHATSAPP_SESSION_OpenWA' => 's1']);
+
+        self::assertSame(['s1'], Config::fromEnvironment()->sessions('OpenWA'));
+    }
+
+    /** Daftar sesi kosong bila tidak ada kunci tunggal maupun jamak. */
+    public function testSessionsReturnsEmptyArrayWhenNothingConfigured(): void
+    {
+        self::fakeEnv([]);
+
+        self::assertSame([], Config::fromEnvironment()->sessions('OpenWA'));
+    }
+
+    /**
+     * Inti dari kunci jamak: bila kunci tunggal tidak diisi, elemen pertama
+     * daftar jamak menjadi sesi aktif bawaan. Kunci tunggal tetap menang
+     * bila keduanya diisi, karena sesi aktif adalah pilihan eksplisit.
+     */
+    public function testSessionPicksFirstFromPluralListWhenSingularUnset(): void
+    {
+        self::fakeEnv(['WHATSAPP_SESSIONS_OpenWA' => 'sales,support,billing']);
+
+        self::assertSame('sales', Config::fromEnvironment()->session('OpenWA'));
+    }
+
+    /** Kunci tunggal menang atas elemen pertama daftar jamak. */
+    public function testSingularSessionBeatsFirstOfPluralList(): void
+    {
+        self::fakeEnv([
+            'WHATSAPP_SESSION_OpenWA' => 'support',
+            'WHATSAPP_SESSIONS_OpenWA' => 'sales,support,billing',
+        ]);
+
+        self::assertSame('support', Config::fromEnvironment()->session('OpenWA'));
+    }
+
+    /**
+     * Kunci jamak WHATSAPP_INSTANCES_<Provider> untuk ApiMe dan EvolutionAPI —
+     * bentuk dan aturannya sama persis dengan WHATSAPP_SESSIONS_<Provider>.
+     */
+    public function testProviderInstancesReadsCommaSeparatedListFromEnv(): void
+    {
+        self::fakeEnv(['WHATSAPP_INSTANCES_ApiMe' => 'uuid-1,uuid-2,uuid-3']);
+
+        self::assertSame(
+            ['uuid-1', 'uuid-2', 'uuid-3'],
+            Config::fromEnvironment()->providerInstances('ApiMe')
+        );
+    }
+
+    public function testProviderInstancesTrimsAndDropsEmpties(): void
+    {
+        self::fakeEnv(['WHATSAPP_INSTANCES_EvolutionAPI' => ' e1 , , e2 ']);
+
+        self::assertSame(['e1', 'e2'], Config::fromEnvironment()->providerInstances('EvolutionAPI'));
+    }
+
+    public function testInstancesOptionBeatsProviderInstancesEnvironment(): void
+    {
+        self::fakeEnv(['WHATSAPP_INSTANCES_ApiMe' => 'env-1,env-2']);
+
+        $config = Config::from(['instances' => ['ApiMe' => ['opsi-1', 'opsi-2']]]);
+
+        self::assertSame(['opsi-1', 'opsi-2'], $config->providerInstances('ApiMe'));
+    }
+
+    public function testInstancesReturnsPluralListOrSingularWrapped(): void
+    {
+        self::fakeEnv(['WHATSAPP_INSTANCES_EvolutionAPI' => 'e1,e2']);
+
+        self::assertSame(['e1', 'e2'], Config::fromEnvironment()->instances('EvolutionAPI'));
+
+        self::fakeEnv(['WHATSAPP_INSTANCE_EvolutionAPI' => 'e1']);
+
+        self::assertSame(['e1'], Config::fromEnvironment()->instances('EvolutionAPI'));
+    }
+
+    public function testInstancePicksFirstFromPluralListWhenSingularUnset(): void
+    {
+        self::fakeEnv(['WHATSAPP_INSTANCES_ApiMe' => 'uuid-1,uuid-2']);
+
+        self::assertSame('uuid-1', Config::fromEnvironment()->instance('ApiMe'));
+    }
+
+    public function testSingularInstanceBeatsFirstOfPluralList(): void
+    {
+        self::fakeEnv([
+            'WHATSAPP_INSTANCE_ApiMe' => 'uuid-2',
+            'WHATSAPP_INSTANCES_ApiMe' => 'uuid-1,uuid-2',
+        ]);
+
+        self::assertSame('uuid-2', Config::fromEnvironment()->instance('ApiMe'));
+    }
 }

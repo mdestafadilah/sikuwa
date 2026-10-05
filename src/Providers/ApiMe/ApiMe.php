@@ -113,6 +113,23 @@ final class ApiMe extends AbstractProvider
     }
 
     /**
+     * Tampilkan semua instance: `GET /api/instances`.
+     *
+     * Tidak butuh `WHATSAPP_INSTANCE` — endpoint ini mendaftar seluruh
+     * instance yang ada di server, bukan satu instance tertentu.
+     *
+     * @return array<int,Session>
+     *
+     * @throws ApiException
+     */
+    public function listSessions(): array
+    {
+        return ApiMeSession::fromListResponse(
+            $this->getJson("{$this->baseUrl}/api/instances")
+        );
+    }
+
+    /**
      * Ambil QR instance: `GET /api/instances/{id}/qr`.
      *
      * Inilah QR yang dipindai untuk menyambungkan instance yang baru dibuat.

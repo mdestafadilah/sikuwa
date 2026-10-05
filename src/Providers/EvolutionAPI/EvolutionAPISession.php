@@ -76,6 +76,70 @@ final class EvolutionAPISession
     }
 
     /**
+     * Terima balasan `GET /instance/fetchInstances` — daftar seluruh instance.
+     *
+     * Berbeda dari endpoint sesi tunggal, `fetchInstances` mengembalikan
+     * rekaman Prisma langsung tanpa amplop `instance`. Field-nya juga beda:
+     * `name` (bukan `instanceName`), `connectionStatus` (bukan `state`), dan
+     * `number` (bukan `owner`). Tetapi karena beberapa versi mungkin masih
+     * membungkus tiap entri di `instance`, keduanya dikenali.
+     *
+     * @param array<string,mixed> $body
+     * @return array<int,Session>
+     */
+    public static function fromListResponse(array $body): array
+    {
+        $items = \array_is_list($body) ? $body : ($body['data'] ?? []);
+
+        $sessions = [];
+
+        foreach ($items as $item) {
+            if (!\is_array($item)) {
+                continue;
+            }
+
+            // `fetchInstances` bisa membalas {instance: {...}} atau objek telanjang.
+            $data = isset($item['instance']) && \is_array($item['instance'])
+                ? $item['instance']
+                : $item;
+
+            $sessions[] = self::fromInstance($data);
+        }
+
+        return $sessions;
+    }
+
+    /**
+     * Normalkan satu rekaman instance dari `fetchInstances`.
+     *
+     * Nama field-nya berbeda dari {@see self::fromResponse()}: `name` bukan
+     * `instanceName`, `connectionStatus` bukan `state`, `number` bukan
+     * `owner`. Keduanya dibaca berurutan supaya method ini bekerja apa pun
+     * bentuk responsnya.
+     *
+     * @param array<string,mixed> $data
+     */
+    private static function fromInstance(array $data): Session
+    {
+        $status = Text::first(
+            $data['connectionStatus'] ?? null,
+            $data['state'] ?? null,
+            $data['status'] ?? null,
+        );
+
+        return new Session(
+            provider: EvolutionAPI::NAME,
+            id: Text::first($data['instanceName'] ?? null, $data['name'] ?? null),
+            status: $status,
+            connected: Text::equalsAny($status, self::CONNECTED),
+            token: Text::of($data['token'] ?? null),
+            phoneNumber: Text::first($data['number'] ?? null, $data['owner'] ?? null),
+            profileName: Text::first($data['profileName'] ?? null, $data['profile_name'] ?? null),
+            raw: $data,
+        );
+    }
+
+    /**
      * Terima balasan `POST /instance/create` maupun
      * `GET /instance/connectionState/{instance}`.
      *

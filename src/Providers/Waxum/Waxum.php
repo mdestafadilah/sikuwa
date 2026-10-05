@@ -140,6 +140,39 @@ final class Waxum extends AbstractProvider
     }
 
     /**
+     * Tampilkan semua sesi: `GET /api/v1/sessions`.
+     *
+     * Tidak butuh `WHATSAPP_SESSION` — endpoint ini mendaftar seluruh sesi
+     * yang ada di server. Setiap entri sudah membawa `status` dan
+     * `is_logged_in` yang diperbarui sesuai runtime, jadi dinormalkan lewat
+     * {@see WaxumSession::fromStatus()} yang sama dengan `checkSession()`.
+     *
+     * @return array<int,Session>
+     *
+     * @throws ApiException
+     */
+    public function listSessions(): array
+    {
+        $body = $this->getJson("{$this->baseUrl}" . self::API . '/sessions');
+
+        $items = $body['sessions'] ?? null;
+
+        if (!\is_array($items)) {
+            return [];
+        }
+
+        $sessions = [];
+
+        foreach ($items as $item) {
+            if (\is_array($item)) {
+                $sessions[] = WaxumSession::fromStatus($item);
+            }
+        }
+
+        return $sessions;
+    }
+
+    /**
      * Ambil QR sesi: `GET /api/v1/sessions/{id}/qr`.
      *
      * Hanya menjawab saat sesi sedang menunggu dipindai. Sesi yang sudah login

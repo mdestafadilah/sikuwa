@@ -70,8 +70,12 @@ final class Client
      * @param array{
      *     provider?:string, token?:string, url?:string, session?:string,
      *     instance?:string, timeout?:int|float, tokens?:array<string,string>,
-     *     headers?:array<string,string>, httpClient?:ClientInterface,
-     *     pacing?:array<string,mixed>, typing?:array<string,mixed>
+     *     urls?:array<string,string>, headers?:array<string,string>,
+     *     httpClient?:ClientInterface, account_token?:string,
+     *     sessions?:array<string,array<int,string>>,
+     *     instances?:array<string,array<int,string>>,
+     *     pacing?:array<string,mixed>, typing?:array<string,mixed>,
+     *     throttle?:array<string,mixed>, retries?:string|int
      * }|Config $options
      */
     public function __construct(array|Config $options = [], ?ClientInterface $httpClient = null)
@@ -406,10 +410,26 @@ final class Client
     }
 
     /**
+     * Tampilkan semua sesi/instance yang dikenal gateway.
+     *
+     * Setiap gateway yang mendukungnya mendaftar seluruh sesi yang ada di
+     * server — pemanggil tidak perlu tahu nama atau id sesi lebih dulu.
+     * Wuzapi tidak mendukungnya (tokennya sendiri yang menentukan sesi),
+     * dan di sana method ini melempar `ConfigurationException`.
+     *
+     * @return array<int,Session>
+     *
+     * @throws WhatsappException
+     */
+    public function listSessions(): array
+    {
+        return $this->provider()->listSessions();
+    }
+
+    /**
      * Ambil QR sesi yang sudah ada, untuk dipindai.
      *
      * Dipakai setelah {@see self::createSession()} atau
-     * {@see self::checkSession()} menunjukkan sesi belum tersambung:
      *
      * ```php
      * $qr = $client->showQr();

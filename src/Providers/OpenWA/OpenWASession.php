@@ -54,6 +54,31 @@ final class OpenWASession
     }
 
     /**
+     * Terima balasan `GET /api/sessions` — daftar seluruh sesi.
+     *
+     * OpenWA bisa membalas array telanjang `[{...}, ...]` maupun terbungkus
+     * `{success, data: [...]}`, sama seperti endpoint sesi tunggal. Setiap
+     * entri dinormalkan lewat {@see self::fromResponse()}.
+     *
+     * @param array<string,mixed> $body
+     * @return array<int,Session>
+     */
+    public static function fromListResponse(array $body): array
+    {
+        $items = \array_is_list($body) ? $body : ($body['data'] ?? []);
+
+        $sessions = [];
+
+        foreach ($items as $item) {
+            if (\is_array($item)) {
+                $sessions[] = self::fromResponse($item);
+            }
+        }
+
+        return $sessions;
+    }
+
+    /**
      * Terima balasan `POST /api/sessions` maupun `GET /api/sessions/{id}`.
      *
      * @param array<string,mixed> $body

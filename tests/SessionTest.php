@@ -15,7 +15,9 @@ use Sikuwa\Whatsapp\Providers\ApiMe\ApiMe;
 use Sikuwa\Whatsapp\Providers\EvolutionAPI\EvolutionAPI;
 use Sikuwa\Whatsapp\Providers\Fonnte\Fonnte;
 use Sikuwa\Whatsapp\Providers\OpenWA\OpenWA;
+use Sikuwa\Whatsapp\Providers\Waxum\Waxum;
 use Sikuwa\Whatsapp\Providers\Wuzapi\Wuzapi;
+use Sikuwa\Whatsapp\Providers\Wwebjs\Wwebjs;
 use Sikuwa\Whatsapp\Session;
 
 /**
@@ -406,6 +408,163 @@ final class SessionTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // listSessions() — mendaftar semua sesi/instance per gateway
+    // ---------------------------------------------------------------------
+
+    public function testOpenWaListsAllSessions(): void
+    {
+        $backend = new MockBackend([MockBackend::json([
+            'success' => true,
+            'data' => [
+                ['id' => 'sess-1', 'status' => 'CONNECTED', 'phoneNumber' => '62811'],
+                ['id' => 'sess-2', 'status' => 'DISCONNECTED'],
+            ],
+        ])]);
+
+        $sessions = $this->openWa($backend)->listSessions();
+
+        self::assertSame('GET', $backend->lastRequest()?->getMethod());
+        self::assertSame(self::BASE . '/api/sessions', (string) $backend->lastRequest()?->getUri());
+        self::assertCount(2, $sessions);
+        self::assertSame('sess-1', $sessions[0]->id);
+        self::assertTrue($sessions[0]->isConnected());
+        self::assertSame('sess-2', $sessions[1]->id);
+        self::assertFalse($sessions[1]->isConnected());
+    }
+
+    public function testApiMeListsAllInstances(): void
+    {
+        $backend = new MockBackend([MockBackend::json([
+            'data' => [
+                ['id' => 'uuid-1', 'status' => 'connected', 'phone_number' => '62811'],
+                ['id' => 'uuid-2', 'status' => 'disconnected'],
+            ],
+        ])]);
+
+        $sessions = (new ApiMe(
+            ['token' => 't', 'url' => self::BASE, 'instance' => 'uuid-9'],
+            $backend->executor()
+        ))->listSessions();
+
+        self::assertSame('GET', $backend->lastRequest()?->getMethod());
+        self::assertSame(self::BASE . '/api/instances', (string) $backend->lastRequest()?->getUri());
+        self::assertCount(2, $sessions);
+        self::assertSame('uuid-1', $sessions[0]->id);
+        self::assertTrue($sessions[0]->isConnected());
+        self::assertSame('62811', $sessions[0]->phoneNumber);
+        self::assertSame('uuid-2', $sessions[1]->id);
+        self::assertFalse($sessions[1]->isConnected());
+    }
+
+    public function testEvolutionListsAllInstances(): void
+    {
+        $backend = new MockBackend([MockBackend::json([
+            ['name' => 'inst1', 'connectionStatus' => 'open', 'number' => '62811', 'profileName' => 'Sekolah'],
+            ['name' => 'inst2', 'connectionStatus' => 'close'],
+        ])]);
+
+        $sessions = (new EvolutionAPI(
+            ['token' => 't', 'url' => self::BASE, 'instance' => 'sikuwa'],
+            $backend->executor()
+        ))->listSessions();
+
+        self::assertSame('GET', $backend->lastRequest()?->getMethod());
+        self::assertSame(self::BASE . '/instance/fetchInstances', (string) $backend->lastRequest()?->getUri());
+        self::assertCount(2, $sessions);
+        self::assertSame('inst1', $sessions[0]->id);
+        self::assertTrue($sessions[0]->isConnected());
+        self::assertSame('62811', $sessions[0]->phoneNumber);
+        self::assertSame('Sekolah', $sessions[0]->profileName);
+        self::assertSame('inst2', $sessions[1]->id);
+        self::assertFalse($sessions[1]->isConnected());
+    }
+
+    public function testFonnteListsAllDevices(): void
+    {
+        $backend = new MockBackend([MockBackend::json([
+            'status' => true,
+            'devices' => 2,
+            'data' => [
+                ['device' => '628111', 'name' => 'lain', 'status' => 'disconnect', 'token' => 'tok-lain'],
+                ['device' => '628222', 'name' => 'sekolah', 'status' => 'connect', 'token' => 'tok-aktif'],
+            ],
+        ])]);
+
+        $sessions = (new Fonnte(
+            ['token' => 'tok-aktif', 'account_token' => 'acct'],
+            $backend->executor()
+        ))->listSessions();
+
+        self::assertSame('POST', $backend->lastRequest()?->getMethod());
+        self::assertSame('https://api.fonnte.com/get-devices', (string) $backend->lastRequest()?->getUri());
+        self::assertSame('acct', $backend->lastHeader('Authorization'));
+        self::assertCount(2, $sessions);
+        self::assertSame('628111', $sessions[0]->id);
+        self::assertFalse($sessions[0]->isConnected());
+        self::assertSame('628222', $sessions[1]->id);
+        self::assertTrue($sessions[1]->isConnected());
+        self::assertSame('sekolah', $sessions[1]->profileName);
+    }
+
+    public function testWuzapiListSessionsThrowsConfigurationException(): void
+    {
+        $backend = new MockBackend([]);
+
+        $this->expectException(ConfigurationException::class);
+        $this->expectExceptionMessage('tidak bisa mendaftar sesi');
+
+        (new Wuzapi(['token' => 't', 'url' => self::BASE], $backend->executor()))->listSessions();
+    }
+
+    public function testWwebjsListsSessionIdsOnly(): void
+    {
+        $backend = new MockBackend([MockBackend::json([
+            'success' => true,
+            'result' => ['sess-a', 'sess-b'],
+        ])]);
+
+        $sessions = (new Wwebjs(
+            ['token' => 't', 'url' => self::BASE, 'session' => 'sess-a'],
+            $backend->executor()
+        ))->listSessions();
+
+        self::assertSame('GET', $backend->lastRequest()?->getMethod());
+        self::assertSame(self::BASE . '/session/getSessions', (string) $backend->lastRequest()?->getUri());
+        self::assertCount(2, $sessions);
+        self::assertSame('sess-a', $sessions[0]->id);
+        // Wwebjs hanya mengembalikan nama session — keadaan dan connectedness kosong.
+        self::assertSame('', $sessions[0]->status);
+        self::assertFalse($sessions[0]->isConnected());
+        self::assertSame('sess-b', $sessions[1]->id);
+    }
+
+    public function testWaxumListsAllSessions(): void
+    {
+        $backend = new MockBackend([MockBackend::json([
+            'sessions' => [
+                ['id' => 'sess-1', 'status' => 'logged_in', 'is_logged_in' => true, 'phone_number' => '62811', 'push_name' => 'Sekolah'],
+                ['id' => 'sess-2', 'status' => 'disconnected', 'is_logged_in' => false],
+            ],
+            'total' => 2,
+        ])]);
+
+        $sessions = (new Waxum(
+            ['token' => 't', 'url' => self::BASE, 'session' => 'sess-1'],
+            $backend->executor()
+        ))->listSessions();
+
+        self::assertSame('GET', $backend->lastRequest()?->getMethod());
+        self::assertSame(self::BASE . '/api/v1/sessions', (string) $backend->lastRequest()?->getUri());
+        self::assertCount(2, $sessions);
+        self::assertSame('sess-1', $sessions[0]->id);
+        self::assertTrue($sessions[0]->isConnected());
+        self::assertSame('62811', $sessions[0]->phoneNumber);
+        self::assertSame('Sekolah', $sessions[0]->profileName);
+        self::assertSame('sess-2', $sessions[1]->id);
+        self::assertFalse($sessions[1]->isConnected());
+    }
+
+    // ---------------------------------------------------------------------
     // Client dan value object
     // ---------------------------------------------------------------------
 
@@ -428,6 +587,20 @@ final class SessionTest extends TestCase
 
         self::assertSame(['id' => 'baru', 'name' => 'Baru'], $backend->lastJson());
         self::assertSame('baru', $session->id);
+    }
+
+    public function testClientDelegatesListSessionsToProvider(): void
+    {
+        $backend = new MockBackend([MockBackend::json([
+            'success' => true,
+            'data' => [['id' => 'sess-1', 'status' => 'CONNECTED']],
+        ])]);
+
+        $sessions = $this->client($backend)->listSessions();
+
+        self::assertCount(1, $sessions);
+        self::assertSame('OpenWA', $sessions[0]->provider);
+        self::assertTrue($sessions[0]->isConnected());
     }
 
     public function testSessionSerialisesWithoutRawPayloadOrToken(): void

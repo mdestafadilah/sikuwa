@@ -100,6 +100,27 @@ final class Wuzapi extends AbstractProvider
     }
 
     /**
+     * Wuzapi tidak bisa mendaftar sesi.
+     *
+     * Token wuzapi sendiri yang menentukan sesi mana yang dipakai — satu
+     * token adalah satu sesi, tidak ada endpoint yang mendaftar sesi lain.
+     * Karena itu method ini melempar {@see ConfigurationException}, bukan
+     * mengembalikan array kosong yang seolah-olah tidak ada sesi sama sekali.
+     *
+     * @return array<int,Session>
+     *
+     * @throws ConfigurationException
+     */
+    public function listSessions(): array
+    {
+        throw new ConfigurationException(
+            'Wuzapi tidak bisa mendaftar sesi: tokennya sendiri yang menentukan sesi mana yang dipakai, '
+            . 'jadi satu token adalah satu sesi. Pakai checkSession() untuk memeriksa sesi yang aktif, '
+            . 'atau gateway lain untuk mengelola beberapa sesi sekaligus.'
+        );
+    }
+
+    /**
      * Ambil QR sesi: `GET /session/qr`.
      *
      * wuzapi hanya mengeluarkan QR saat sesinya tersambung ke server WhatsApp

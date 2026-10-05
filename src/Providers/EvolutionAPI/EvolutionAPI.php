@@ -107,6 +107,23 @@ final class EvolutionAPI extends AbstractProvider
     }
 
     /**
+     * Tampilkan semua instance: `GET /instance/fetchInstances`.
+     *
+     * Tidak butuh `WHATSAPP_INSTANCE` — endpoint ini mendaftar seluruh
+     * instance yang ada di server, bukan satu instance tertentu.
+     *
+     * @return array<int,Session>
+     *
+     * @throws ApiException
+     */
+    public function listSessions(): array
+    {
+        return EvolutionAPISession::fromListResponse(
+            $this->getJson("{$this->baseUrl}/instance/fetchInstances")
+        );
+    }
+
+    /**
      * Ambil QR instance: `GET /instance/connect/{instance}`.
      *
      * Balasannya berubah mengikuti keadaan instance. Selama masih `close`,

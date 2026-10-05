@@ -59,6 +59,34 @@ final class ApiMeSession
     }
 
     /**
+     * Terima balasan `GET /api/instances` — daftar seluruh instance.
+     *
+     * ApiMe selalu membungkus datanya di dalam kunci `data`, jadi daftarnya
+     * ada di sana. Setiap entri dinormalkan lewat {@see self::fromResponse()}.
+     *
+     * @param array<string,mixed> $body
+     * @return array<int,Session>
+     */
+    public static function fromListResponse(array $body): array
+    {
+        $items = $body['data'] ?? null;
+
+        if (!\is_array($items)) {
+            $items = \array_is_list($body) ? $body : [];
+        }
+
+        $sessions = [];
+
+        foreach ($items as $item) {
+            if (\is_array($item)) {
+                $sessions[] = self::fromResponse($item);
+            }
+        }
+
+        return $sessions;
+    }
+
+    /**
      * Terima balasan `POST /api/instances` maupun `GET /api/instances/{id}`.
      *
      * ApiMe tidak memakai amplop seragam, jadi field dibaca dengan beberapa

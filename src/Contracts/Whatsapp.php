@@ -227,6 +227,37 @@ interface Whatsapp
     public function checkSession(?string $id = null): Session;
 
     /**
+     * Tampilkan semua sesi/instance yang dikenal gateway.
+     *
+     * Mengembalikan daftar `Session` — bentuk yang sama dengan
+     * {@see self::checkSession()} — untuk setiap sesi yang ada di gateway.
+     * Pemanggil tidak perlu tahu nama atau id sesi lebih dulu; method ini
+     * menjawab pertanyaan "sesi apa saja yang ada?".
+     *
+     * Enam gateway mendukungnya: OpenWA (`GET /api/sessions`), ApiMe
+     * (`GET /api/instances`), Evolution API (`GET /instance/fetchInstances`),
+     * Fonnte (`POST /get-devices` — daftar perangkat di akun), Wwebjs
+     * (`GET /session/getSessions` — daftar nama sesi saja), dan Waxum
+     * (`GET /api/v1/sessions`).
+     *
+     * **Wuzapi tidak bisa mendaftar sesi**: tokennya sendiri yang menentukan
+     * sesi mana yang dipakai, jadi satu token adalah satu sesi. Di sana
+     * method ini melempar {@see Exceptions\ConfigurationException} yang
+     * menjelaskan hal itu — bukan mengembalikan array kosong yang
+     * seolah-olah gateway tidak punya sesi sama sekali.
+     *
+     * **Wwebjs hanya mengembalikan nama sesi** — endpoint-nya tidak
+     * menyertakan keadaan sambungan. Setiap `Session` hanya terisi `$id`
+     * dan `$provider`; `$status` dan `$connected` dibiarkan kosong. Panggil
+     * {@see self::checkSession()} per sesi untuk mengetahui keadaannya.
+     *
+     * @return array<int,Session>
+     *
+     * @throws \Sikuwa\Whatsapp\Exceptions\WhatsappException
+     */
+    public function listSessions(): array;
+
+    /**
      * Ambil QR milik sesi yang sudah ada, untuk dipindai.
      *
      * Dipanggil setelah {@see self::createSession()} atau

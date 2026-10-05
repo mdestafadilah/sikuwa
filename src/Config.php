@@ -23,7 +23,8 @@ use Sikuwa\Whatsapp\Support\Typing;
  * Kunci yang dikenali: `WA_NOTIFICATION`, `WHATSAPP_PROVIDER`,
  * `WHATSAPP_TOKEN`, `WHATSAPP_TOKEN_<Provider>`, `WHATSAPP_URL`,
  * `WHATSAPP_URL_<Provider>`, `WHATSAPP_SESSION`, `WHATSAPP_SESSION_<Provider>`,
- * `WHATSAPP_INSTANCE`, `WHATSAPP_INSTANCE_<Provider>`,
+ * `WHATSAPP_SESSIONS_<Provider>`, `WHATSAPP_INSTANCE`,
+ * `WHATSAPP_INSTANCE_<Provider>`, `WHATSAPP_INSTANCES_<Provider>`,
  * `WHATSAPP_ACCOUNT_TOKEN`, `WHATSAPP_TIMEOUT`, `WHATSAPP_PACING_CYCLE`,
  * `WHATSAPP_PACING_INTERVAL`, `WHATSAPP_PACING_LONG_CHARS`,
  * `WHATSAPP_PACING_LONG_FACTOR`, `WHATSAPP_TYPING`, `WHATSAPP_TYPING_SPEED`,
@@ -54,6 +55,16 @@ final class Config
      *                              `WHATSAPP_INSTANCE_<Provider>` tetap menang atasnya.
      * @param string|null $accountToken Token akun, khusus Fonnte Device API —
      *                                  lihat {@see self::accountToken()}.
+     * @param array<string,array<int,string>> $sessions Daftar sesi per
+     *                                                  provider, mis.
+     *                                                  ['OpenWA' => ['s1','s2']].
+     *                                                  Menang atas
+     *                                                  `WHATSAPP_SESSIONS_<Provider>`.
+     * @param array<string,array<int,string>> $instances Daftar instance per
+     *                                                   provider, mis.
+     *                                                   ['ApiMe' => ['i1','i2']].
+     *                                                   Menang atas
+     *                                                   `WHATSAPP_INSTANCES_<Provider>`.
      * @param Pacing|null $pacing Pengatur jeda antar pesan saat mengirim
      *                            beruntun — lihat {@see self::pacing()}.
      * @param Typing|null $typing Pengatur indikator "sedang mengetik" yang
@@ -69,9 +80,11 @@ final class Config
         private array $tokens = [],
         private ?string $provider = null,
         private array $headers = [],
-        private array $urls = [],
-        private ?string $accountToken = null,
-        private ?Pacing $pacing = null,
+     private array $urls = [],
+     private ?string $accountToken = null,
+     private array $sessions = [],
+     private array $instances = [],
+     private ?Pacing $pacing = null,
         private ?Typing $typing = null,
         private ?Throttle $throttle = null,
         private ?int $retries = null
@@ -86,6 +99,8 @@ final class Config
      *     timeout?:int|float, tokens?:array<string,string>, provider?:string,
      *     headers?:array<string,string>, urls?:array<string,string>,
      *     account_token?:string,
+     *     sessions?:array<string,array<int,string>>,
+     *     instances?:array<string,array<int,string>>,
      *     pacing?:array{
      *         cycle?:string|array<int,mixed>,
      *         interval?:string|int|array<int,mixed>,
@@ -120,6 +135,8 @@ final class Config
             headers: $options['headers'] ?? [],
             urls: $options['urls'] ?? [],
             accountToken: $options['account_token'] ?? null,
+            sessions: $options['sessions'] ?? [],
+            instances: $options['instances'] ?? [],
             pacing: self::pacingOption($options['pacing'] ?? null),
             typing: self::typingOption($options['typing'] ?? null),
             throttle: self::throttleOption($options['throttle'] ?? null),
@@ -389,8 +406,126 @@ final class Config
     }
 
     /**
-     * Id session efektif. Urutannya: kunci khusus provider, lalu nilai
-     * eksplisit, lalu `WHATSAPP_SESSION`.
+     * Daftar id sesi khusus satu provider: `WHATSAPP_SESSIONS_<Provider>`.
+     *
+     * Kunci jamak (plural) ini berisi daftar id sesi yang dipisah koma, untuk
+     * aplikasi yang mengelola beberapa sesi sekaligus di satu gateway — mis.
+     * satu OpenWA dengan tiga sesi untuk tiga departemen. Kunci tunggal
+     * {@see providerSession()} menentukan sesi **aktif**; kunci jamak ini
+     * mendaftar semuanya yang dikenal aplikasi.
+     *
+     * Seperti {@see providerSession()}, kunci ini tidak pernah jatuh ke kunci
+     * umum — tiap gateway punya daftarnya sendiri. Nilai eksplisit di konstruktor
+     * menang atas environment, sama seperti `tokens` dan `urls`.
+     *
+     * @return array<int,string>
+     */
+    public function providerSessions(string $provider): array
+    {
+        $explicit = $this->sessions[$provider] ?? null;
+
+        if ($explicit !== null) {
+            return array_values(array_filter(
+                $explicit,
+                static fn ($s): bool => \is_string($s) && $s !== ''
+            ));
+        }
+
+        $raw = self::env("WHATSAPP_SESSIONS_{$provider}");
+
+        return $raw === null ? [] : self::splitList($raw);
+    }
+
+    /**
+     * Daftar sesi efektif. Urutannya: daftar khusus provider, lalu sesi tunggal
+     * dibungkus jadi array satu elemen.
+     *
+     * Mengembalikan daftar kosong bila tidak ada sesi yang dikonfigurasi. Dipakai
+     * bersama {@see listSessions()} untuk membandingkan sesi yang dikenal
+     * aplikasi dengan yang dikenal server.
+     *
+     * @return array<int,string>
+     */
+    public function sessions(?string $provider = null): array
+    {
+        if ($provider !== null) {
+            $list = $this->providerSessions($provider);
+
+            if ($list !== []) {
+                return $list;
+            }
+        }
+
+        $active = $this->session($provider);
+
+        return $active !== '' ? [$active] : [];
+    }
+
+    /**
+     * Daftar id instance khusus satu provider: `WHATSAPP_INSTANCES_<Provider>`.
+     *
+     * Kunci jamak untuk ApiMe dan Evolution API, sama seperti
+     * {@see providerSessions()} untuk gateway berbasis sesi.
+     *
+     * @return array<int,string>
+     */
+    public function providerInstances(string $provider): array
+    {
+        $explicit = $this->instances[$provider] ?? null;
+
+        if ($explicit !== null) {
+            return array_values(array_filter(
+                $explicit,
+                static fn ($s): bool => \is_string($s) && $s !== ''
+            ));
+        }
+
+        $raw = self::env("WHATSAPP_INSTANCES_{$provider}");
+
+        return $raw === null ? [] : self::splitList($raw);
+    }
+
+    /**
+     * Daftar instance efektif. Urutannya: daftar khusus provider, lalu instance
+     * tunggal dibungkus jadi array satu elemen.
+     *
+     * @return array<int,string>
+     */
+    public function instances(?string $provider = null): array
+    {
+        if ($provider !== null) {
+            $list = $this->providerInstances($provider);
+
+            if ($list !== []) {
+                return $list;
+            }
+        }
+
+        $active = $this->instance($provider);
+
+        return $active !== '' ? [$active] : [];
+    }
+
+    /**
+     * Pisah daftar yang dipisah koma: trim tiap elemen, buang yang kosong.
+     *
+     * Dipakai oleh {@see providerSessions()} dan {@see providerInstances()} —
+     * bentuk masukan yang sama (string dipisah koma) dan hasil yang sama (array
+     * bersih tanpa elemen kosong).
+     *
+     * @return array<int,string>
+     */
+    private static function splitList(string $raw): array
+    {
+        $parts = array_map(static fn (string $s): string => trim($s), explode(',', $raw));
+
+        return array_values(array_filter($parts, static fn (string $s): bool => $s !== ''));
+    }
+
+    /**
+     * Id session efektif. Urutannya: kunci khusus provider tunggal, lalu
+     * elemen pertama dari kunci jamak, lalu nilai eksplisit, lalu
+     * `WHATSAPP_SESSION`.
      *
      * Dipakai OpenWA, Wwebjs, dan Waxum. Provider yang tidak memakai session
      * (Fonnte, ApiMe, Evolution API, wuzapi) tetap bisa memanggil ini tanpa
@@ -400,15 +535,31 @@ final class Config
     {
         $specific = $provider !== null ? $this->providerSession($provider) : null;
 
-        return $specific
-            ?? (($this->session === null || $this->session === '') ? null : $this->session)
+        if ($specific !== null) {
+            return $specific;
+        }
+
+        // Kalau kunci tunggal tidak diisi, ambil yang pertama dari daftar sesi
+        // jamak — itu yang paling sering dimaksud sebagai sesi aktif bawaan.
+        // Kunci tunggal tetap menang bila keduanya diisi, karena sesi aktif
+        // adalah pilihan eksplisit, bukan urutan dalam daftar.
+        if ($provider !== null) {
+            $sessions = $this->providerSessions($provider);
+
+            if ($sessions !== []) {
+                return $sessions[0];
+            }
+        }
+
+        return (($this->session === null || $this->session === '') ? null : $this->session)
             ?? self::env('WHATSAPP_SESSION')
             ?? '';
     }
 
     /**
-     * Id/nama instance efektif. Urutannya: kunci khusus provider, lalu nilai
-     * eksplisit, lalu `WHATSAPP_INSTANCE`.
+     * Id/nama instance efektif. Urutannya: kunci khusus provider tunggal, lalu
+     * elemen pertama dari kunci jamak, lalu nilai eksplisit, lalu
+     * `WHATSAPP_INSTANCE`.
      *
      * Dipakai ApiMe dan Evolution API.
      */
@@ -416,8 +567,21 @@ final class Config
     {
         $specific = $provider !== null ? $this->providerInstance($provider) : null;
 
-        return $specific
-            ?? (($this->instance === null || $this->instance === '') ? null : $this->instance)
+        if ($specific !== null) {
+            return $specific;
+        }
+
+        // Sama seperti session(): kunci jamak hanya menjadi sumber sesi aktif
+        // bawaan bila kunci tunggal tidak diisi.
+        if ($provider !== null) {
+            $instances = $this->providerInstances($provider);
+
+            if ($instances !== []) {
+                return $instances[0];
+            }
+        }
+
+        return (($this->instance === null || $this->instance === '') ? null : $this->instance)
             ?? self::env('WHATSAPP_INSTANCE')
             ?? '';
     }

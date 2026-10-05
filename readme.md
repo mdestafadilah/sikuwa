@@ -623,6 +623,46 @@ if ($qr->isConnected()) {
 }
 ```
 
+### Daftar sesi
+
+Selain membuat dan memeriksa satu sesi, SDK bisa mendaftar semua sesi yang
+dikenal gateway lewat `listSessions()`:
+
+```php
+foreach ($client->listSessions() as $session) {
+    echo "{$session->id}: {$session->status}\n";
+
+    if (! $session->isConnected()) {
+        echo $client->showQr($session->id)->qrTag();
+    }
+}
+```
+
+Setiap entri adalah `Session` yang sama — bentuknya identik dengan
+`checkSession()`. Method ini tidak butuh `WHATSAPP_SESSION`/
+`WHATSAPP_INSTANCE` karena ia mendaftar seluruh sesi, bukan satu sesi
+tertententu.
+
+**Wuzapi tidak mendukungnya**: tokennya sendiri yang menentukan sesi mana yang
+dipakai, jadi satu token adalah satu sesi. Di sana `listSessions()` melempar
+`ConfigurationException` yang menjelaskan hal itu, bukan mengembalikan array
+kosong yang seolah-olah gateway tidak punya sesi.
+
+**Wwebjs hanya mengembalikan nama session**: endpoint-nya tidak menyertakan
+keadaan sambungan. Setiap `Session` hanya terisi `$id` dan `$provider`; status
+dan `connected` dibiarkan kosong. Panggil `checkSession($id)` per session untuk
+mengetahui keadaannya.
+
+| Gateway | Endpoint | Catatan |
+| --- | --- | --- |
+| OpenWA | `GET /api/sessions` | — |
+| ApiMe | `GET /api/instances` | — |
+| Evolution API | `GET /instance/fetchInstances` | Field berbeda dari sesi tunggal: `name`, `connectionStatus` |
+| Fonnte | `POST /get-devices` | Memakai account token, bukan token perangkat |
+| Wuzapi | — | Tidak didukung (token = sesi) |
+| Wwebjs | `GET /session/getSessions` | Hanya nama session, tanpa keadaan |
+| Waxum | `GET /api/v1/sessions` | Setiap entri sudah membawa status runtime |
+
 Catatan per gateway:
 
 - **OpenWA** — `GET /api/sessions/{id}/qr` menuntut API key berperan
@@ -715,8 +755,10 @@ Lihat [`.env.example`](.env.example). Ringkasnya:
 | `WHATSAPP_URL_<Provider>` | Base URL per gateway. **Ini yang sebaiknya dipakai** untuk self-hosted |
 | `WHATSAPP_URL` | Base URL cadangan bila kunci per-provider kosong. **Diabaikan Fonnte** |
 | `WHATSAPP_SESSION_<Provider>` | Id session per gateway. **Ini yang sebaiknya dipakai** bila beberapa gateway butuh session berbeda |
+| `WHATSAPP_SESSIONS_<Provider>` | Daftar id session per gateway, dipisah koma. Mendaftar semua sesi yang dikenal aplikasi; kunci tunggal di atas menentukan yang **aktif** |
 | `WHATSAPP_SESSION` | Id session cadangan bila kunci per-provider kosong |
 | `WHATSAPP_INSTANCE_<Provider>` | Id/nama instance per gateway |
+| `WHATSAPP_INSTANCES_<Provider>` | Daftar id instance per gateway, dipisah koma. Seperti `WHATSAPP_SESSIONS_<Provider>`, untuk ApiMe dan EvolutionAPI |
 | `WHATSAPP_INSTANCE` | Id/nama instance cadangan bila kunci per-provider kosong |
 | `WHATSAPP_ACCOUNT_TOKEN` | Khusus Fonnte Device API (`add-device`, `get-devices`). Bukan token perangkat |
 | `WHATSAPP_TIMEOUT` | Batas waktu request, detik (1–60, default 10) |
@@ -780,6 +822,46 @@ pernah terpakai oleh Wwebjs atau Waxum.
 
 Nama provider ditulis apa adanya mengikuti kunci per-provider yang sudah ada
 (`WHATSAPP_SESSION_OpenWA`), bukan diubah menjadi huruf besar.
+
+### Beberapa sesi untuk satu gateway
+
+Kunci tunggal di atas hanya menampung satu sesi aktif. Kalau satu gateway
+mengelola beberapa sesi sekaligus — mis. satu server OpenWA dengan sesi untuk
+departemen *sales*, *support*, dan *billing* — daftarkan semuanya di kunci
+jamak yang dipisah koma:
+
+```dotenv
+WHATSAPP_SESSIONS_OpenWA=sales,support,billing
+WHATSAPP_SESSIONS_Wwebjs=sales,support
+WHATSAPP_INSTANCES_ApiMe=8f1c…,9a2b…
+```
+
+Kunci jamak mendaftar sesi yang **dikenal aplikasi**; kunci tunggal
+(`WHATSAPP_SESSION_<Provider>`) menentukan yang **aktif**. Bila kunci tunggal
+tidak diisi, elemen pertama daftar jamak menjadi sesi aktif bawaan. Kunci
+tunggal tetap menang bila keduanya diisi, karena sesi aktif adalah pilihan
+eksplisit, bukan urutan dalam daftar.
+
+Daftar sesi yang efektif bisa dibaca lewat `$client->config()->sessions()`:
+
+```php
+foreach ($client->config()->sessions('OpenWA') as $id) {
+    $session = $client->checkSession($id);   // periksa tiap sesi
+    if (! $session->isConnected()) {
+        echo $client->showQr($id)->qrTag();   // QR per sesi
+    }
+}
+```
+
+Setara lewat opsi konstruktor:
+`['sessions' => ['OpenWA' => ['sales', 'support', 'billing']]]`
+dan `['instances' => ['ApiMe' => ['uuid-1', 'uuid-2']]]`. Opsi eksplisit menang
+atas environment, sama seperti `tokens` dan `urls`.
+
+`listSessions()` berbeda dari daftar ini: ia mendaftar sesi yang ada di
+**sisi server**, bukan yang terdaftar di `.env`. Membandingkan keduanya —
+`config()->sessions()` vs `listSessions()` — adalah cara menemukan sesi yang
+sudah dikonfigurasi tetapi belum dibuat di server, atau sebaliknya.
 
 ### Catatan per gateway
 
@@ -1127,6 +1209,7 @@ yang sudah teruji.
 - [x] Pagar laju / warmup (`WHATSAPP_THROTTLE_MAX` & `WHATSAPP_THROTTLE_WINDOW`)
 - [x] Percobaan ulang otomatis 429/503 dengan menghormati `Retry-After` (`WHATSAPP_RETRIES`)
 - [x] Periksa ukuran media sebelum kirim (`File::size()`, `exceedsLimit()`, batas WhatsApp 16 MB)
+- [x] Multi Session — mendaftar semua sesi/instance per gateway (`listSessions()`)
 
 ## Kredit
 
