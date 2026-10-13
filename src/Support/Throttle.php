@@ -7,11 +7,18 @@ namespace Sikuwa\Whatsapp\Support;
 /**
  * Pembatas laju pengiriman: berapa pesan boleh keluar dalam satu jendela waktu.
  *
- * Berbeda dari {@see Pacing} yang mengatur jeda **antar** pesan di dalam satu
- * batch, kelas ini membatasi **jumlah** pesan — termasuk ketika pemanggil
- * mengirim satu pesan per request, yang justru pola paling sering dipakai
- * aplikasi nyata. Pacing tidak melihat kasus itu sama sekali: lima panggilan
- * `send()` terpisah tidak punya "pesan berikutnya" untuk diberi jeda.
+ * Berbeda dari {@see Pacing} yang mengatur jeda **antar** pesan, kelas ini
+ * membatasi **jumlah** pesan: dengan `max = 3` dan `window = 60`, pesan ke-4
+ * dan seterusnya ditahan sampai jendela berikutnya terbuka.
+ *
+ * Batas ini dihitung dari **posisi pesan di dalam satu panggilan**, dan kelas
+ * ini tidak menyimpan keadaan apa pun. Konsekuensinya mudah terlewat dan sudah
+ * pernah menyesatkan: pemanggil yang mengirim **satu pesan per request** — lima
+ * panggilan `send()` terpisah — **tidak dibatasi sama sekali**, karena tiap
+ * panggilan selalu mulai dari posisi nol. Pacing memang tidak melihat kasus itu
+ * (tidak ada "pesan berikutnya" untuk diberi jeda), tetapi kelas ini pun tidak.
+ * Untuk pola itu batasnya harus ditegakkan pemanggil sendiri, mis. kuota harian
+ * di sisi aplikasi.
  *
  * Pembatasnya bekerja dengan menahan pemanggil SEBELUM pesan dikirim, bukan
  * menolaknya: kalau jatah jendela ini habis, SDK menunggu sampai jendela

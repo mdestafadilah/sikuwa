@@ -368,6 +368,14 @@ Bawaannya **mati**. Seperti pacing, ia menahan proses pemanggil, jadi nyalakan
 dengan sadar — dan pilih `MAX`/`WINDOW` sesuai umur akun, bukan langsung ke angka
 "aman" yang besar.
 
+**Batas ini dihitung per panggilan.** Posisinya selalu mulai dari nol di tiap
+`send()`, dan SDK tidak menyimpan keadaan antar-panggilan. Jadi pemanggil yang
+mengirim satu pesan per request — pola yang justru paling sering dipakai aplikasi
+nyata — **tidak dibatasi sama sekali**: tiap panggilan hanya berisi satu pesan di
+posisi 0, sehingga `MAX+1` tidak pernah tercapai. Untuk pola itu, tegakkan
+kuotanya di sisi aplikasi Anda (mis. hitungan harian di database). Pacing pun
+tidak melihat kasus ini, karena tidak ada "pesan berikutnya" untuk diberi jeda.
+
 ```php
 // Paling banyak 20 pesan per 60 detik:
 //   posisi 0..19  -> 0 detik

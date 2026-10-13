@@ -224,6 +224,47 @@ final class ThrottleTest extends TestCase
         self::assertSame([30], $jeda);
     }
 
+    /**
+     * Batasnya per panggilan, bukan per proses — dan itu memang perilaku
+     * sekarang, bukan bug yang belum ketahuan.
+     *
+     * Posisi pesan selalu mulai dari nol di tiap `send()`, jadi pemanggil yang
+     * mengirim satu pesan per request — pola paling umum di aplikasi nyata —
+     * tidak dibatasi sama sekali. Test ini mengunci perilaku itu supaya
+     * keterbatasannya terlihat alih-alih tersembunyi: kalau suatu saat cap
+     * antar-proses ditambahkan, test inilah yang harus berubah lebih dulu.
+     */
+    public function testThrottleDoesNotRememberAcrossSeparateCalls(): void
+    {
+        $backend = new MockBackend([
+            MockBackend::json(['data' => ['whatsappId' => 'a']]),
+            MockBackend::json(['data' => ['whatsappId' => 'b']]),
+            MockBackend::json(['data' => ['whatsappId' => 'c']]),
+        ]);
+        $jeda = [];
+        AbstractProvider::useSleeper(static function (int $seconds) use (&$jeda): void {
+            $jeda[] = $seconds;
+        });
+
+        $provider = new ApiMe([
+            'token' => 't',
+            'url' => 'https://api.test',
+            'instance' => 'inst-1',
+            'throttle' => ['max' => 2, 'window' => 30],
+        ], $backend->executor());
+
+        for ($i = 0; $i < 3; $i++) {
+            $provider->sendMessage(['destination' => '081' . $i, 'message' => 'a']);
+        }
+
+        self::assertSame(3, $backend->count());
+        self::assertSame(
+            [],
+            $jeda,
+            'Tiga panggilan terpisah semuanya di posisi 0, jadi MAX+1 tidak pernah tercapai'
+        );
+    }
+
     // ----------------------------------------------------- Tujuan berulang
 
     public function testRepeatedTargetsAreReported(): void
