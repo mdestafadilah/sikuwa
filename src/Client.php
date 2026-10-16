@@ -7,6 +7,7 @@ namespace Sikuwa\Whatsapp;
 use GuzzleHttp\ClientInterface;
 use Psr\Log\LoggerInterface;
 use Sikuwa\Whatsapp\Contracts\Whatsapp;
+use Sikuwa\Whatsapp\Exceptions\ApiException;
 use Sikuwa\Whatsapp\Exceptions\ConfigurationException;
 use Sikuwa\Whatsapp\Exceptions\UnknownProviderException;
 use Sikuwa\Whatsapp\Exceptions\WhatsappException;
@@ -18,6 +19,7 @@ use Sikuwa\Whatsapp\Providers\OpenWA\OpenWA;
 use Sikuwa\Whatsapp\Providers\Waxum\Waxum;
 use Sikuwa\Whatsapp\Providers\Wuzapi\Wuzapi;
 use Sikuwa\Whatsapp\Providers\Wwebjs\Wwebjs;
+use Sikuwa\Whatsapp\Support\Log;
 
 /**
  * Titik masuk SDK — pemegang konfigurasi, transport, dan pemilihan gateway.
@@ -77,7 +79,7 @@ final class Client
      *     instances?:array<string,array<int,string>>,
      *     pacing?:array<string,mixed>, typing?:array<string,mixed>,
      *     throttle?:array<string,mixed>, retries?:string|int,
-     *     logger?:LoggerInterface
+     *     logger?:LoggerInterface, rotate?:mixed
      * }|Config $options
      */
     public function __construct(array|Config $options = [], ?ClientInterface $httpClient = null)
@@ -258,12 +260,34 @@ final class Client
      * ]);
      * ```
      *
+     * Satu batch bisa juga dibagi ke beberapa gateway sekaligus lewat
+     * `WHATSAPP_ROTATE` — hanya berguna bersama `provider = auto`, karena satu
+     * gateway yang dipilih tetap tidak punya apa pun untuk dibagi:
+     *
+     * ```php
+     * // .env: WHATSAPP_PROVIDER=auto, WHATSAPP_ROTATE=1, tiga token terisi
+     * $client->send(['messages' => $seratusPesan]);
+     * // Sukses, 100/100 pesan terkirim lewat 3 gateway (Fonnte 34, OpenWA 33, Wuzapi 33)
+     * ```
+     *
      * @param array<string,mixed>|array<int,array<string,mixed>>|string $message
      *
      * @throws WhatsappException
      */
     public function send(array|string $message): string
     {
+        // Rotasi hanya menyentuh bentuk daftar: satu pesan tidak punya apa pun
+        // untuk dibagi, dan jalur lamanya sudah benar. Saklarnya diperiksa
+        // lebih dulu supaya selama ia mati tidak ada satu pun pekerjaan
+        // tambahan di jalur kirim.
+        if ($this->config->rotate()->isEnabled() && \is_array($message)) {
+            $batch = self::batchOf($message);
+
+            if ($batch !== null && \count($batch) > 1) {
+                return $this->sendAcrossGateways($message, $batch);
+            }
+        }
+
         return $this->provider()->sendMessage($message);
     }
 
@@ -518,5 +542,169 @@ final class Client
         shuffle($candidates);
 
         return $candidates[0];
+    }
+
+    /**
+     * Daftar pesan bila panggilan ini berbentuk batch, atau null bila satu pesan.
+     *
+     * Bentuknya dikenali persis seperti `plan()` di tiap gateway: elemen
+     * pertama yang berupa array pesan. Elemen yang bukan pesan — kunci
+     * pengaturan seperti `pacing` yang ikut berdiri di daftar yang sama — tidak
+     * dihitung, supaya jumlah pesannya tidak meleset satu.
+     *
+     * Daftar yang isinya tidak lengkap dikembalikan sependek yang bisa
+     * dikenali, bukan ditolak di sini: yang berhak mengeluh soal pesan cacat
+     * adalah gateway-nya, dengan pesan yang menyebut posisinya.
+     *
+     * @param array<string,mixed>|array<int,mixed> $message
+     *
+     * @return array<int,array<string,mixed>>|null
+     */
+    private static function batchOf(array $message): ?array
+    {
+        $list = isset($message['messages']) && \is_array($message['messages'])
+            ? $message['messages']
+            : $message;
+
+        if (! isset($list[0]) || ! \is_array($list[0])) {
+            return null;
+        }
+
+        return array_values(array_filter(
+            $list,
+            static fn (mixed $item): bool => \is_array($item) && isset($item['destination'], $item['message'])
+        ));
+    }
+
+    /**
+     * Kunci pengaturan tingkat panggilan yang harus ikut ke tiap potongan.
+     *
+     * Pemanggil menulisnya di amplop, jadi ia berlaku untuk seluruh batch —
+     * dan batch itu sekarang dipecah. Tanpa dipindahkan, pengaturan yang
+     * disebut pemanggil akan hilang diam-diam di potongan kedua dan
+     * seterusnya, yang justru bagian yang paling butuh dijeda.
+     *
+     * @param array<string,mixed> $message
+     *
+     * @return array<string,mixed>
+     */
+    private static function envelopeSettings(array $message): array
+    {
+        $settings = [];
+
+        foreach (['pacing', 'typing', 'throttle'] as $key) {
+            if (isset($message[$key])) {
+                $settings[$key] = $message[$key];
+            }
+        }
+
+        return $settings;
+    }
+
+    /**
+     * Kirim satu batch pesan teks lewat beberapa gateway sekaligus.
+     *
+     * Batch dibagi bergiliran setelah urutan gatewaynya diundi, lalu tiap
+     * potongan dikirim oleh gateway-nya sendiri — jadi gateway yang punya
+     * endpoint batch tetap mengirim potongannya dalam satu request.
+     *
+     * Tiga akibat yang perlu diketahui pemanggil, dan disebut apa adanya
+     * daripada disembunyikan:
+     *
+     * - **Urutan pesan tidak lagi menaik.** Potongan pertama dikirim habis
+     *   sebelum potongan kedua, jadi pesan ke-6 bisa tiba sebelum pesan ke-2.
+     *   Untuk pengiriman ke banyak tujuan ini tidak terasa; untuk rangkaian
+     *   yang urutannya berarti, jangan nyalakan rotasi.
+     * - **Jeda dan pagar laju dihitung per gateway.** Tiap gateway menerima
+     *   daftarnya sendiri, dan jedanya dihitung dari posisi di dalam daftar
+     *   itu. "Dua puluh pesan per menit" berarti dua puluh per gateway, bukan
+     *   dua puluh untuk seluruh batch.
+     * - **Kegagalan satu gateway tidak membatalkan yang lain.** Potongan yang
+     *   gagal dilaporkan bersama nama gatewaynya, dan exception-nya baru
+     *   dilempar setelah semua potongan dicoba.
+     *
+     * @param array<string,mixed>|array<int,mixed> $message Bentuk asli dari pemanggil.
+     * @param array<int,array<string,mixed>>       $batch   Hasil {@see self::batchOf()}.
+     *
+     * @throws WhatsappException
+     */
+    private function sendAcrossGateways(array $message, array $batch): string
+    {
+        $dipilih = $this->config->provider();
+
+        if ($dipilih === null || $dipilih === '') {
+            throw new ConfigurationException(
+                'WHATSAPP_PROVIDER belum diisi, dan tidak ada nama provider yang diberikan'
+            );
+        }
+
+        if (strcasecmp($dipilih, self::AUTO) !== 0) {
+            throw new ConfigurationException(
+                "WHATSAPP_ROTATE menyala, tetapi WHATSAPP_PROVIDER berisi '{$dipilih}' — "
+                . 'satu gateway yang dipilih tetap tidak punya apa pun untuk dibagi. '
+                . 'Isi WHATSAPP_PROVIDER=auto, atau matikan WHATSAPP_ROTATE.'
+            );
+        }
+
+        $kandidat = self::configured($this->config);
+
+        if (\count($kandidat) < 2) {
+            // Bukan kegagalan: mode auto tetap jalan dengan satu gateway, dan
+            // rotasi cuma tidak punya pilihan. Yang tidak boleh terjadi adalah
+            // pemanggil mengira batchnya sudah dibagi padahal tidak.
+            Log::write(
+                $this->config->logger(),
+                'warning',
+                'WHATSAPP_ROTATE menyala, tetapi hanya satu gateway yang punya token — '
+                . 'seluruh batch dikirim lewat gateway itu saja',
+                ['provider' => $kandidat[0] ?? null]
+            );
+
+            return $this->provider()->sendMessage($message);
+        }
+
+        $potongan = $this->config->rotate()->assign(\count($batch), $kandidat);
+        $pengaturan = self::envelopeSettings($message);
+        $total = \count($batch);
+        $terkirim = 0;
+        $dipakai = [];
+        $gagal = [];
+        $terakhir = null;
+
+        foreach ($potongan as $nama => $posisi) {
+            $isi = [];
+
+            foreach ($posisi as $i) {
+                $isi[] = $batch[$i];
+            }
+
+            try {
+                $this->provider($nama)->sendMessage($pengaturan + ['messages' => $isi]);
+                $terkirim += \count($isi);
+                $dipakai[] = $nama . ' ' . \count($isi);
+            } catch (WhatsappException $e) {
+                $terakhir = $e;
+                $gagal[] = $nama . ': ' . $e->getMessage();
+            }
+        }
+
+        if ($gagal !== []) {
+            // Angka di depan adalah yang **dipastikan** terkirim: potongan yang
+            // gagal sebagian tidak menambah hitungannya, jadi laporannya
+            // meremehkan, bukan membesar-besarkan. Rincian tiap gateway ada di
+            // pesan kegagalannya sendiri.
+            $lewat = $dipakai === [] ? '' : ' lewat ' . \count($dipakai) . ' gateway';
+
+            throw new ApiException(
+                "{$terkirim}/{$total} pesan terkirim{$lewat}. Gagal: " . implode(' | ', $gagal),
+                $terakhir instanceof ApiException ? $terakhir->getStatus() : 0,
+                null,
+                null,
+                $terakhir
+            );
+        }
+
+        return "Sukses, {$terkirim}/{$total} pesan terkirim lewat " . \count($dipakai)
+            . ' gateway (' . implode(', ', $dipakai) . ')';
     }
 }

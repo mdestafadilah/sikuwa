@@ -16,6 +16,7 @@ use Sikuwa\Whatsapp\Http\HttpResponse;
 use Sikuwa\Whatsapp\NumberCheck;
 use Sikuwa\Whatsapp\Session;
 use Sikuwa\Whatsapp\Support\File;
+use Sikuwa\Whatsapp\Support\Log;
 use Sikuwa\Whatsapp\Support\PhoneNumber;
 use Sikuwa\Whatsapp\Support\Presence;
 use Sikuwa\Whatsapp\Support\Text;
@@ -447,14 +448,14 @@ abstract class AbstractProvider implements Whatsapp
     /**
      * Catat satu kejadian ke logger pemanggil, bila ada.
      *
-     * Satu-satunya jalan SDK ini menulis ke log. Selama pemanggil tidak
-     * memasang logger, seluruh method ini tidak melakukan apa-apa — sehingga
-     * perilakunya sama persis seperti sebelum logger ada.
+     * Selama pemanggil tidak memasang logger, seluruh method ini tidak
+     * melakukan apa-apa — sehingga perilakunya sama persis seperti sebelum
+     * logger ada.
      *
-     * Logger sengaja **tidak pernah** bisa menggagalkan pengiriman: kelas
-     * logger yang melempar — mis. karena disk penuh, atau konteksnya tidak
-     * sesuai harapannya — akan mengubah kegagalan hiasan menjadi kegagalan
-     * pesan. Karena itu exception-nya ditelan di sini, dan hanya di sini.
+     * Isinya ada di {@see Log::write()}, bukan di sini: `Client` juga mencatat
+     * satu kejadian (rotasi gateway yang tidak punya cukup kandidat), dan
+     * aturan "logger tidak boleh menggagalkan pengiriman" tidak boleh punya
+     * dua salinan yang bisa berbeda diam-diam.
      *
      * @param string              $level   Level PSR-3: `debug`, `info`,
      *                                     `warning`, atau `error`.
@@ -463,17 +464,7 @@ abstract class AbstractProvider implements Whatsapp
      */
     protected function log(string $level, string $message, array $context = []): void
     {
-        $logger = $this->config->logger();
-
-        if ($logger === null) {
-            return;
-        }
-
-        try {
-            $logger->log($level, $message, $context);
-        } catch (\Throwable) {
-            // Sengaja ditelan — lihat penjelasan di atas.
-        }
+        Log::write($this->config->logger(), $level, $message, $context);
     }
 
     /**

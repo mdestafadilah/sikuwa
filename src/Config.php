@@ -6,6 +6,7 @@ namespace Sikuwa\Whatsapp;
 
 use Psr\Log\LoggerInterface;
 use Sikuwa\Whatsapp\Support\Pacing;
+use Sikuwa\Whatsapp\Support\Rotation;
 use Sikuwa\Whatsapp\Support\Throttle;
 use Sikuwa\Whatsapp\Support\Typing;
 
@@ -30,7 +31,8 @@ use Sikuwa\Whatsapp\Support\Typing;
  * `WHATSAPP_PACING_INTERVAL`, `WHATSAPP_PACING_LONG_CHARS`,
  * `WHATSAPP_PACING_LONG_FACTOR`, `WHATSAPP_TYPING`, `WHATSAPP_TYPING_SPEED`,
  * `WHATSAPP_TYPING_MIN`, `WHATSAPP_TYPING_MAX`, `WHATSAPP_THROTTLE_MAX`,
- * `WHATSAPP_THROTTLE_WINDOW`, `WHATSAPP_RETRIES`, `WHATSAPP_CHECK_NUMBERS`.
+ * `WHATSAPP_THROTTLE_WINDOW`, `WHATSAPP_RETRIES`, `WHATSAPP_CHECK_NUMBERS`,
+ * `WHATSAPP_ROTATE`.
  */
 final class Config
 {
@@ -79,6 +81,9 @@ final class Config
      *                                pesan teks, dan lewati yang dipastikan
      *                                tidak terdaftar — lihat
      *                                {@see self::checkNumbers()}.
+     * @param Rotation|null $rotate Bagi satu batch pesan ke beberapa gateway
+     *                              sekaligus saat `provider = auto` — lihat
+     *                              {@see self::rotate()}.
      */
     public function __construct(
         private ?string $token = null,
@@ -98,7 +103,8 @@ final class Config
         private ?Throttle $throttle = null,
         private ?int $retries = null,
         private ?LoggerInterface $logger = null,
-        private ?bool $checkNumbers = null
+        private ?bool $checkNumbers = null,
+        private ?Rotation $rotate = null
     ) {
     }
 
@@ -124,7 +130,8 @@ final class Config
      *     throttle?:array{max?:string|int, window?:string|int}|Throttle,
      *     retries?:string|int,
      *     logger?:LoggerInterface,
-     *     check_numbers?:mixed
+     *     check_numbers?:mixed,
+     *     rotate?:mixed|array{enabled?:mixed}
      * }|Config|null $options
      */
     public static function from(array|Config|null $options): self
@@ -158,6 +165,7 @@ final class Config
             checkNumbers: isset($options['check_numbers'])
                 ? filter_var($options['check_numbers'], FILTER_VALIDATE_BOOLEAN)
                 : null,
+            rotate: self::rotateOption($options['rotate'] ?? null),
         );
     }
 
@@ -177,6 +185,7 @@ final class Config
             throttle: self::throttleFromEnv(),
             retries: self::retriesFromEnv(),
             checkNumbers: self::checkNumbersFromEnv(),
+            rotate: self::rotateFromEnv(),
         );
     }
 
@@ -745,6 +754,39 @@ final class Config
     }
 
     /**
+     * Apakah satu batch pesan teks dibagi ke beberapa gateway sekaligus.
+     *
+     * Melengkapi mode `auto`, yang hanya mengundi **sekali per panggilan**:
+     * satu `send()` berisi seratus pesan tetap keluar lewat satu gateway saja,
+     * karena undiannya terjadi sebelum pesan pertama dikirim. Saat rotasi
+     * menyala, batch itu dibagi ke semua gateway yang punya
+     * `WHATSAPP_TOKEN_<Provider>`, bergiliran setelah urutannya diundi —
+     * lihat {@see Rotation::assign()}.
+     *
+     * Empat hal yang disengaja:
+     *
+     * - **Bawaannya mati.** Menyalakannya mengubah rute pengiriman, dan
+     *   pengiriman massal adalah hal yang paling tidak ingin dikejutkan oleh
+     *   perubahan rute. Sama seperti pacing dan pagar laju, ia harus
+     *   dinyalakan dengan sadar.
+     * - **Hanya berlaku untuk bentuk daftar, minimal dua pesan.** Satu pesan
+     *   tidak punya apa pun untuk dibagi, jadi ia lewat jalur lama.
+     * - **Hanya berlaku untuk pesan teks.** Media dikirim satu per satu, dan
+     *   memindahkannya antar gateway hanya menambah tempat yang bisa gagal.
+     * - **Menuntut `provider = auto`.** Kalau `WHATSAPP_PROVIDER` menyebut satu
+     *   nama gateway, pemanggil sudah memilih gatewaynya sendiri — rotasi di
+     *   situ bertentangan, dan `Client::send()` menolaknya dengan
+     *   `ConfigurationException` alih-alih diam-diam mengabaikannya.
+     *
+     * Method ini mengembalikan **pengaturan**, bukan hasil pembagiannya. Untuk
+     * pembagiannya, lihat {@see Rotation::assign()}.
+     */
+    public function rotate(): Rotation
+    {
+        return $this->rotate ?? self::rotateFromEnv();
+    }
+
+    /**
      * Saklar `WHATSAPP_CHECK_NUMBERS` dari environment.
      *
      * Dikumpulkan di satu tempat seperti {@see self::retriesFromEnv()}, supaya
@@ -759,6 +801,41 @@ final class Config
         $value = self::env('WHATSAPP_CHECK_NUMBERS');
 
         return $value !== null && filter_var($value, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * Rotasi gateway dari environment.
+     *
+     * Dikumpulkan di satu tempat seperti {@see self::checkNumbersFromEnv()},
+     * supaya dua jalur yang memakainya — {@see self::fromEnvironment()} dan
+     * {@see self::rotate()} — tidak bisa berbeda diam-diam.
+     */
+    private static function rotateFromEnv(): Rotation
+    {
+        return Rotation::fromConfig(self::env('WHATSAPP_ROTATE'));
+    }
+
+    /**
+     * Terima opsi `rotate` dalam bentuk objek jadi, array, atau saklar mentah.
+     *
+     * Tiga bentuk diterima karena tiga-tiganya wajar ditulis pemanggil:
+     * `'rotate' => true`, `'rotate' => ['enabled' => true]`, dan
+     * `'rotate' => Rotation::fromConfig('1')`.
+     *
+     * @return Rotation|null Null bila pemanggil tidak mengirim apa pun, supaya
+     *                       {@see self::rotate()} masih bisa jatuh ke environment.
+     */
+    private static function rotateOption(mixed $value): ?Rotation
+    {
+        if ($value instanceof Rotation) {
+            return $value;
+        }
+
+        if (\is_array($value)) {
+            return Rotation::fromArray($value);
+        }
+
+        return $value === null ? null : Rotation::fromConfig($value);
     }
 
     /**

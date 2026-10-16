@@ -535,6 +535,50 @@ $gateway->sendMessage($pesan);             // pasti lewat OpenWA
 `providerName()` berguna untuk mencatat ke log atau memeriksa konfigurasi; ia
 sendiri **tidak** mengunci pilihan, karena tiap pemanggilan mengundi ulang.
 
+### Membagi batch ke beberapa gateway
+
+Undian `Auto` terjadi **sekali per panggilan**, jadi satu `send()` berisi seratus
+pesan tetap keluar lewat satu gateway saja: semua beban menumpuk di satu
+perangkat, sementara gateway lain yang sudah dikonfigurasi menganggur. Untuk
+pengiriman massal itu justru pola yang paling cepat menabrak batas laju gateway.
+
+`WHATSAPP_ROTATE` membagi batch itu ke **semua** gateway yang punya
+`WHATSAPP_TOKEN_<Provider>`:
+
+```dotenv
+WHATSAPP_PROVIDER=auto
+WHATSAPP_ROTATE=1
+```
+
+```php
+$client->send(['messages' => $seratusPesan]);
+// Sukses, 100/100 pesan terkirim lewat 3 gateway (OpenWA 34, Wuzapi 33, Wwebjs 33)
+```
+
+- Urutan gatewaynya **diundi tiap panggilan**, dan pembagiannya **bergiliran** —
+  jumlah pesan tiap gateway berbeda paling banyak satu. Undian murni per pesan
+  terlihat lebih "acak", tetapi ia bisa menaruh 90 dari 100 pesan di satu
+  gateway, yang berarti fiturnya gagal tepat pada satu-satunya alasan ia
+  dinyalakan.
+- Hanya untuk **pesan teks** berbentuk daftar, minimal dua pesan. Satu pesan,
+  media, `checkNumbers()`, dan pembuatan sesi tidak terpengaruh.
+- Menuntut `provider = auto`. Kalau `WHATSAPP_PROVIDER` menyebut satu nama
+  gateway, `send()` menolaknya dengan `ConfigurationException` — pemanggil yang
+  memilih gatewaynya sendiri tidak boleh diam-diam dikirimi potongan lewat
+  gateway lain.
+
+Tiga hal yang berubah, dan sebaiknya diketahui sebelum menyalakannya:
+
+| Yang berubah | Akibatnya |
+| --- | --- |
+| Urutan pesan | Potongan pertama dikirim habis dulu, jadi pesan ke-6 bisa tiba sebelum pesan ke-2. Jangan dipakai untuk rangkaian yang urutannya berarti. |
+| Jeda & pagar laju | Dihitung **per gateway**, karena tiap gateway menerima daftarnya sendiri. `WHATSAPP_THROTTLE_MAX=20` berarti 20 per gateway, bukan 20 untuk seluruh batch. |
+| Laporan hasil | Menyebut pembagiannya (`lewat 3 gateway (OpenWA 34, …)`). Potongan yang gagal dilaporkan bersama nama gatewaynya, dan potongan lain tetap dicoba. |
+
+Satu gateway bertoken bukan kegagalan: batchnya dikirim lewat gateway itu saja,
+dan kejadiannya dicatat ke logger sebagai peringatan — supaya tidak ada yang
+mengira batchnya sudah dibagi padahal belum.
+
 ## Sesi
 
 Selain mengirim pesan, SDK bisa membuat dan memeriksa sesi WhatsApp lewat
@@ -783,6 +827,7 @@ Lihat [`.env.example`](.env.example). Ringkasnya:
 | `WHATSAPP_THROTTLE_WINDOW` | Panjang satu jendela pagar laju, detik |
 | `WHATSAPP_RETRIES` | Percobaan ulang otomatis untuk 429/503 yang menyebutkan `Retry-After`, pada pengiriman pesan dan pemeriksaan nomor (default 0) |
 | `WHATSAPP_CHECK_NUMBERS` | Periksa nomor tujuan lebih dulu dan lewati yang dipastikan tidak terdaftar. Kosong = mati |
+| `WHATSAPP_ROTATE` | Bagi satu batch pesan teks ke semua gateway yang bertoken. Menuntut `WHATSAPP_PROVIDER=auto`. Kosong = mati |
 
 ### URL per gateway
 
@@ -1190,6 +1235,11 @@ SDK-nya dipanggil dalam potongan kecil. SDK tidak menyimpan antrean: siapa yang
 belum terkirim, jam berapa harus dikirim, dan bagaimana mengulang yang gagal
 adalah urusan aplikasi.
 
+Satu hal yang bisa dikerjakan SDK di dalam satu potongan: kalau beberapa gateway
+dikonfigurasi, `WHATSAPP_ROTATE` membagi potongan itu ke semuanya sekaligus —
+lihat [Membagi batch ke beberapa gateway](#membagi-batch-ke-beberapa-gateway).
+Antreannya tetap milik Anda; yang dibagi hanya rutenya.
+
 ### Polanya
 
 Tiga komponen, semuanya di sisi Anda:
@@ -1388,6 +1438,7 @@ yang sudah teruji.
 - [x] Periksa nomor terdaftar sebelum kirim (`checkNumbers()`, `NumberCheck`)
 - [x] Penyaring tujuan otomatis di jalur kirim teks (`WHATSAPP_CHECK_NUMBERS`)
 - [x] Logger PSR-3 opsional untuk kejadian yang tidak menggagalkan pengiriman
+- [x] Bagi batch ke beberapa gateway saat kirim banyak (`WHATSAPP_ROTATE`)
 
 ## Kredit
 
