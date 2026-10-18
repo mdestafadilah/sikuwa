@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Sikuwa\Whatsapp\Tests;
 
-use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Sikuwa\Whatsapp\Config;
 use Sikuwa\Whatsapp\Exceptions\RateLimitException;
@@ -76,9 +75,9 @@ final class RetryTest extends TestCase
         ] + $extra;
     }
 
-    private static function rateLimited(int $retryAfter = 5): Response
+    private static function rateLimited(int $retryAfter = 5): HttpResponse
     {
-        return new Response(
+        return MockBackend::response(
             429,
             ['Content-Type' => 'application/json', 'Retry-After' => (string) $retryAfter],
             '{"message":"rate limited"}'
@@ -107,7 +106,7 @@ final class RetryTest extends TestCase
         $moment = time() + 60;
         $header = gmdate('D, d M Y H:i:s', $moment) . ' GMT';
 
-        $backend = new MockBackend([new Response(429, ['Retry-After' => $header], '{}')]);
+        $backend = new MockBackend([MockBackend::response(429, ['Retry-After' => $header], '{}')]);
         $provider = new ApiMe($this->options(), $backend->executor());
 
         try {
@@ -124,7 +123,7 @@ final class RetryTest extends TestCase
 
     public function testRetryAfterIsNullWhenGatewayDoesNotSayIt(): void
     {
-        $backend = new MockBackend([new Response(429, ['Content-Type' => 'application/json'], '{}')]);
+        $backend = new MockBackend([MockBackend::response(429, ['Content-Type' => 'application/json'], '{}')]);
         $provider = new ApiMe($this->options(), $backend->executor());
 
         try {
@@ -207,7 +206,7 @@ final class RetryTest extends TestCase
     {
         $this->config($this->baseEnv() + ['WHATSAPP_RETRIES' => '3']);
 
-        $backend = new MockBackend([new Response(429, ['Content-Type' => 'application/json'], '{}')]);
+        $backend = new MockBackend([MockBackend::response(429, ['Content-Type' => 'application/json'], '{}')]);
         $provider = new ApiMe($this->options(['retries' => 1]), $backend->executor());
 
         try {
@@ -225,7 +224,7 @@ final class RetryTest extends TestCase
 
         // 401 tidak akan sembuh kalau diulang, walau Retry-After-nya ada.
         $backend = new MockBackend([
-            new Response(401, ['Retry-After' => '10'], '{"message":"token ditolak"}'),
+            MockBackend::response(401, ['Retry-After' => '10'], '{"message":"token ditolak"}'),
         ]);
         $provider = new ApiMe($this->options(['retries' => 1]), $backend->executor());
 
@@ -243,7 +242,7 @@ final class RetryTest extends TestCase
         $this->config($this->baseEnv() + ['WHATSAPP_RETRIES' => '1']);
 
         $backend = new MockBackend([
-            new Response(503, ['Retry-After' => '4'], '{"message":"session belum siap"}'),
+            MockBackend::response(503, ['Retry-After' => '4'], '{"message":"session belum siap"}'),
             MockBackend::json(['success' => true]),
         ]);
         $provider = new ApiMe($this->options(['retries' => 1]), $backend->executor());

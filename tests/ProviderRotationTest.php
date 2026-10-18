@@ -83,7 +83,7 @@ final class ProviderRotationTest extends TestCase
      * `totalMessages`, wuzapi mewajibkan `success` — jadi badannya
      * digabungkan daripada membuat dua antrean yang harus ditebak urutannya.
      *
-     * @return array<int,\GuzzleHttp\Psr7\Response>
+     * @return array<int,\Sikuwa\Whatsapp\Http\HttpResponse>
      */
     private static function responses(int $jumlah = 8): array
     {
@@ -135,7 +135,7 @@ final class ProviderRotationTest extends TestCase
         $rute = [];
 
         foreach ($backend->history as $entry) {
-            $host = $entry['request']->getUri()->getHost();
+            $host = parse_url($entry['request']->getUri(), PHP_URL_HOST);
             $body = (string) $entry['request']->getBody();
 
             foreach ($nomor as $n) {
@@ -155,7 +155,7 @@ final class ProviderRotationTest extends TestCase
     private function delayOpenWA(MockBackend $backend): ?int
     {
         foreach ($backend->history as $entry) {
-            if ($entry['request']->getUri()->getHost() !== 'openwa.test') {
+            if (parse_url($entry['request']->getUri(), PHP_URL_HOST) !== 'openwa.test') {
                 continue;
             }
 

@@ -24,8 +24,8 @@
     ],
     "require": {
         "php": ">=8.1",
+        "ext-curl": "*",
         "ext-mbstring": "*",
-        "guzzlehttp/guzzle": "^7.9",
         "psr/log": "^2.0 || ^3.0"
     },
     "require-dev": {

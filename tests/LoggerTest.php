@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Sikuwa\Whatsapp\Tests;
 
-use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Sikuwa\Whatsapp\Client;
 use Sikuwa\Whatsapp\Config;
+use Sikuwa\Whatsapp\Http\HttpResponse;
 use Sikuwa\Whatsapp\Providers\AbstractProvider;
 use Sikuwa\Whatsapp\Providers\ApiMe\ApiMe;
 use Sikuwa\Whatsapp\Providers\OpenWA\OpenWA;
@@ -228,9 +228,9 @@ final class LoggerTest extends TestCase
         ];
     }
 
-    private static function rateLimited(int $retryAfter): Response
+    private static function rateLimited(int $retryAfter): HttpResponse
     {
-        return new Response(
+        return MockBackend::response(
             429,
             ['Content-Type' => 'application/json', 'Retry-After' => (string) $retryAfter],
             '{"message":"rate limited"}'

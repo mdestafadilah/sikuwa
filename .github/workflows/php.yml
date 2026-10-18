@@ -17,13 +17,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # PHP disiapkan eksplisit: composer.json menuntut ext-mbstring, sedangkan
-    # versi dan ekstensi bawaan runner bisa berubah tanpa pemberitahuan.
+    # PHP disiapkan eksplisit: composer.json menuntut ext-mbstring dan
+    # ext-curl, sedangkan versi dan ekstensi bawaan runner bisa berubah tanpa
+    # pemberitahuan.
     - name: Setup PHP
       uses: shivammathur/setup-php@v2
       with:
         php-version: '8.3'
-        extensions: mbstring
+        extensions: mbstring, curl
         coverage: none
 
     - name: Validate composer.json and composer.lock

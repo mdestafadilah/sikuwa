@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Sikuwa\Whatsapp\Tests;
 
-use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Sikuwa\Whatsapp\Config;
 use Sikuwa\Whatsapp\Exceptions\ForbiddenException;
 use Sikuwa\Whatsapp\Exceptions\RateLimitException;
+use Sikuwa\Whatsapp\Http\HttpResponse;
 use Sikuwa\Whatsapp\Providers\AbstractProvider;
 use Sikuwa\Whatsapp\Providers\EvolutionAPI\EvolutionAPI;
 use Sikuwa\Whatsapp\Providers\OpenWA\OpenWA;
@@ -51,9 +51,9 @@ final class ProbeRetryTest extends TestCase
         Config::useResolver(null);
     }
 
-    private static function rateLimited(int $retryAfter = 5): Response
+    private static function rateLimited(int $retryAfter = 5): HttpResponse
     {
-        return new Response(
+        return MockBackend::response(
             429,
             ['Content-Type' => 'application/json', 'Retry-After' => (string) $retryAfter],
             '{"message":"rate limited"}'
@@ -212,7 +212,7 @@ final class ProbeRetryTest extends TestCase
     {
         // 403 tidak akan sembuh kalau diulang — kunci baca tetap kunci baca.
         $backend = new MockBackend([
-            new Response(403, ['Retry-After' => '10'], '{"message":"butuh kunci operator"}'),
+            MockBackend::response(403, ['Retry-After' => '10'], '{"message":"butuh kunci operator"}'),
         ]);
 
         $this->expectException(ForbiddenException::class);
@@ -228,7 +228,7 @@ final class ProbeRetryTest extends TestCase
     public function testNoRetryWhenGatewayDoesNotSendRetryAfter(): void
     {
         $backend = new MockBackend([
-            new Response(429, ['Content-Type' => 'application/json'], '{}'),
+            MockBackend::response(429, ['Content-Type' => 'application/json'], '{}'),
         ]);
 
         $this->expectException(RateLimitException::class);

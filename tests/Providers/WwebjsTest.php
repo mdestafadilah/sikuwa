@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Sikuwa\Whatsapp\Tests\Providers;
 
-use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 use Sikuwa\Whatsapp\Config;
 use Sikuwa\Whatsapp\Exceptions\ApiException;
 use Sikuwa\Whatsapp\Exceptions\ConfigurationException;
 use Sikuwa\Whatsapp\Exceptions\ForbiddenException;
 use Sikuwa\Whatsapp\Exceptions\TimeoutException;
+use Sikuwa\Whatsapp\Http\HttpResponse;
 use Sikuwa\Whatsapp\Providers\Wwebjs\Wwebjs;
 use Sikuwa\Whatsapp\Tests\MockBackend;
 
@@ -36,9 +36,9 @@ final class WwebjsTest extends TestCase
         );
     }
 
-    private static function png(): Response
+    private static function png(): HttpResponse
     {
-        return new Response(200, ['Content-Type' => 'image/png'], self::PNG);
+        return MockBackend::response(200, ['Content-Type' => 'image/png'], self::PNG);
     }
 
     public function testSendsSingleMessage(): void

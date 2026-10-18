@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Sikuwa\Whatsapp;
 
-use GuzzleHttp\ClientInterface;
 use Psr\Log\LoggerInterface;
 use Sikuwa\Whatsapp\Contracts\Whatsapp;
 use Sikuwa\Whatsapp\Exceptions\ApiException;
@@ -12,6 +11,7 @@ use Sikuwa\Whatsapp\Exceptions\ConfigurationException;
 use Sikuwa\Whatsapp\Exceptions\UnknownProviderException;
 use Sikuwa\Whatsapp\Exceptions\WhatsappException;
 use Sikuwa\Whatsapp\Http\HttpExecutor;
+use Sikuwa\Whatsapp\Http\Transport;
 use Sikuwa\Whatsapp\Providers\ApiMe\ApiMe;
 use Sikuwa\Whatsapp\Providers\EvolutionAPI\EvolutionAPI;
 use Sikuwa\Whatsapp\Providers\Fonnte\Fonnte;
@@ -44,10 +44,11 @@ use Sikuwa\Whatsapp\Support\Log;
  * Opsi yang tidak diisi akan dicari di environment (`WHATSAPP_*`), jadi di
  * aplikasi CodeIgniter cukup `new Client()` tanpa argumen apa pun.
  *
- * Untuk pengujian, suntikkan klien Guzzle ber-handler `MockHandler`:
+ * Untuk pengujian, suntikkan {@see Transport} sendiri — bawaan SDK adalah
+ * transport cURL, jadi tidak ada klien HTTP pihak ketiga yang perlu dipalsukan:
  *
  * ```php
- * $client = new Client(['provider' => 'Fonnte'], $mockGuzzleClient);
+ * $client = new Client(['provider' => 'Fonnte'], $transportPalsu);
  * ```
  */
 final class Client
@@ -74,7 +75,7 @@ final class Client
      *     provider?:string, token?:string, url?:string, session?:string,
      *     instance?:string, timeout?:int|float, tokens?:array<string,string>,
      *     urls?:array<string,string>, headers?:array<string,string>,
-     *     httpClient?:ClientInterface, account_token?:string,
+     *     httpClient?:Transport, transport?:Transport, account_token?:string,
      *     sessions?:array<string,array<int,string>>,
      *     instances?:array<string,array<int,string>>,
      *     pacing?:array<string,mixed>, typing?:array<string,mixed>,
@@ -82,12 +83,15 @@ final class Client
      *     logger?:LoggerInterface, rotate?:mixed
      * }|Config $options
      */
-    public function __construct(array|Config $options = [], ?ClientInterface $httpClient = null)
+    public function __construct(array|Config $options = [], ?Transport $httpClient = null)
     {
         $this->config = Config::from($options);
 
+        // `httpClient` adalah nama lama dan tetap diterima supaya kode yang
+        // sudah ada tidak perlu diubah; `transport` adalah nama yang sekarang
+        // dijelaskan di readme.
         $injected = $httpClient
-            ?? (\is_array($options) ? ($options['httpClient'] ?? null) : null);
+            ?? (\is_array($options) ? ($options['httpClient'] ?? $options['transport'] ?? null) : null);
 
         $this->http = new HttpExecutor(
             $injected,

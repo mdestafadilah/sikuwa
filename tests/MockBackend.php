@@ -4,49 +4,57 @@ declare(strict_types=1);
 
 namespace Sikuwa\Whatsapp\Tests;
 
-use GuzzleHttp\Client as GuzzleClient;
-use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\ConnectException;
-use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Middleware;
-use GuzzleHttp\Psr7\Request;
-use GuzzleHttp\Psr7\Response;
-use Psr\Http\Message\RequestInterface;
+use OutOfBoundsException;
 use Sikuwa\Whatsapp\Http\HttpExecutor;
+use Sikuwa\Whatsapp\Http\HttpRequest;
+use Sikuwa\Whatsapp\Http\HttpResponse;
+use Sikuwa\Whatsapp\Http\Transport;
 
 /**
  * Gateway palsu untuk pengujian: membalas dari antrean respons dan merekam
  * setiap request yang masuk.
  *
- * Dipasang lewat opsi `httpClient` pada Client/provider, jadi tidak ada
- * monkey-patching global dan tidak ada jaringan yang tersentuh.
+ * Ia mengimplementasikan {@see Transport} — antarmuka yang sama dengan
+ * transport cURL bawaan — jadi tidak ada klien HTTP pihak ketiga yang perlu
+ * dipalsukan, dan tidak ada jaringan yang tersentuh. Pemasangannya lewat opsi
+ * `httpClient`/`transport` pada Client atau lewat {@see self::executor()}.
  */
-final class MockBackend
+final class MockBackend implements Transport
 {
-    public MockHandler $handler;
+    /** @var array<int,HttpResponse> */
+    private array $queue;
 
-    /** @var array<int,array{request:RequestInterface,response:Response,options:array<string,mixed>}> */
+    /** @var array<int,array{request:HttpRequest,response:HttpResponse}> */
     public array $history = [];
 
-    private ClientInterface $client;
-
     /**
-     * @param array<int,Response|ConnectException> $responses Dibalas berurutan.
+     * @param array<int,HttpResponse> $responses Dibalas berurutan.
      */
     public function __construct(array $responses = [])
     {
-        $this->handler = new MockHandler($responses);
-
-        $stack = HandlerStack::create($this->handler);
-        $stack->push(Middleware::history($this->history));
-
-        $this->client = new GuzzleClient(['handler' => $stack]);
+        $this->queue = array_values($responses);
     }
 
-    public function client(): ClientInterface
+    public function send(HttpRequest $request): HttpResponse
     {
-        return $this->client;
+        if ($this->queue === []) {
+            // Sama seperti antrean Guzzle dulu: kehabisan balasan adalah
+            // kesalahan penyusunan tes, bukan keadaan yang boleh ditelan.
+            throw new OutOfBoundsException(
+                'MockBackend kehabisan respons untuk ' . $request->getMethod() . ' ' . $request->getUri()
+            );
+        }
+
+        $response = array_shift($this->queue);
+
+        $this->history[] = ['request' => $request, 'response' => $response];
+
+        return $response;
+    }
+
+    public function client(): Transport
+    {
+        return $this;
     }
 
     /**
@@ -57,43 +65,55 @@ final class MockBackend
      */
     public function executor(float $timeout = 10.0, array $defaultHeaders = []): HttpExecutor
     {
-        return new HttpExecutor($this->client, $timeout, $defaultHeaders);
+        return new HttpExecutor($this, $timeout, $defaultHeaders);
     }
 
     /** @param array<string,mixed> $body */
-    public static function json(array $body, int $status = 200): Response
+    public static function json(array $body, int $status = 200): HttpResponse
     {
-        return new Response(
-            $status,
-            ['Content-Type' => 'application/json'],
-            (string) json_encode($body)
-        );
+        return new HttpResponse($status, (string) json_encode($body));
     }
 
     /** Respons 2xx yang body-nya bukan JSON. */
-    public static function raw(string $body = '<html>oops</html>', int $status = 200): Response
+    public static function raw(string $body = '<html>oops</html>', int $status = 200): HttpResponse
     {
-        return new Response($status, ['Content-Type' => 'text/html'], $body);
+        return new HttpResponse($status, $body);
     }
 
-    public static function timeout(): ConnectException
+    /**
+     * Respons dengan status dan header bebas.
+     *
+     * Hanya `Retry-After` yang disimpan: itulah satu-satunya header yang
+     * dibaca SDK dari respons, jadi menyalin yang lain hanya akan menyesatkan.
+     *
+     * @param array<string,string> $headers
+     */
+    public static function response(int $status, array $headers = [], string $body = ''): HttpResponse
     {
-        return new ConnectException(
+        $retryAfter = null;
+
+        foreach ($headers as $name => $value) {
+            if (strcasecmp((string) $name, 'Retry-After') === 0) {
+                $retryAfter = (string) $value;
+            }
+        }
+
+        return new HttpResponse($status, $body, '', false, $retryAfter);
+    }
+
+    public static function timeout(): HttpResponse
+    {
+        return new HttpResponse(
+            0,
+            null,
             'cURL error 28: Operation timed out after 10000 milliseconds',
-            new Request('POST', 'https://example.test'),
-            null,
-            ['errno' => 28]
+            true
         );
     }
 
-    public static function connectionFailure(): ConnectException
+    public static function connectionFailure(): HttpResponse
     {
-        return new ConnectException(
-            'cURL error 6: Could not resolve host',
-            new Request('POST', 'https://example.test'),
-            null,
-            ['errno' => 6]
-        );
+        return new HttpResponse(0, null, 'cURL error 6: Could not resolve host');
     }
 
     public function count(): int
@@ -101,14 +121,14 @@ final class MockBackend
         return \count($this->history);
     }
 
-    public function lastRequest(): ?RequestInterface
+    public function lastRequest(): ?HttpRequest
     {
         return $this->history === [] ? null : $this->history[array_key_last($this->history)]['request'];
     }
 
     public function lastBody(): string
     {
-        return (string) ($this->lastRequest()?->getBody() ?? '');
+        return $this->lastRequest()?->getBody() ?? '';
     }
 
     /** @return array<string,mixed> */

@@ -8,8 +8,9 @@ sehingga penggantian provider atau otomatis pilih provider tidak mengubah kode p
 [![PHP](https://img.shields.io/packagist/php-v/mdestafadilah/sikuwa.svg?style=flat-square)](https://packagist.org/packages/mdestafadilah/sikuwa)
 [![Lisensi](https://img.shields.io/packagist/l/mdestafadilah/sikuwa.svg?style=flat-square)](LICENSE)
 
-Namespace `Sikuwa\Whatsapp\`, PSR-4, dibangun di atas [Guzzle](https://docs.guzzlephp.org/) 7,
-membutuhkan PHP 8.1+.
+Namespace `Sikuwa\Whatsapp\`, PSR-4, tanpa pustaka HTTP pihak ketiga: transport-nya
+cURL langsung, dan satu-satunya dependensi runtime adalah `psr/log`. Membutuhkan
+PHP 8.1+.
 
 ## Gateway yang didukung
 
@@ -29,7 +30,8 @@ membutuhkan PHP 8.1+.
 composer require mdestafadilah/sikuwa
 ```
 
-Butuh PHP 8.1+ dan `ext-mbstring`; Guzzle 7 dan `psr/log` ikut terpasang sebagai dependensi.
+Butuh PHP 8.1+, `ext-mbstring`, dan `ext-curl`; satu-satunya dependensi runtime
+adalah `psr/log`.
 
 Untuk mengikuti `main` alih-alih rilis stabil:
 
@@ -1407,11 +1409,11 @@ composer install
 composer test
 ```
 
-Tidak ada jaringan yang tersentuh: test menyuntikkan klien Guzzle ber-handler
-`MockHandler` lewat opsi `httpClient`, sehingga tidak perlu monkey-patching global.
+Tidak ada jaringan yang tersentuh: test menyuntikkan `Transport` palsu lewat
+opsi `httpClient` (alias `transport`), sehingga tidak perlu monkey-patching global.
 
 ```php
-$client = new Client(['provider' => 'Fonnte'], $mockGuzzleClient);
+$client = new Client(['provider' => 'Fonnte'], $transportPalsu);
 ```
 
 ## Butuh satu gateway saja?

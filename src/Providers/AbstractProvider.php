@@ -1027,8 +1027,9 @@ abstract class AbstractProvider implements Whatsapp
      * POST multipart, lalu baca + tolak + wajib-JSON dalam satu langkah.
      *
      * Dipakai gateway yang menuntut berkasnya diunggah sebagai biner —
-     * Fonnte dan ApiMe. `Content-Type` sengaja tidak ikut diisi: hanya
-     * Guzzle yang tahu `boundary` milik body ini.
+     * Fonnte dan ApiMe. `Content-Type` sengaja tidak ikut diisi: `boundary`
+     * yang memisahkan bagian body baru diketahui saat body dirakit oleh
+     * {@see \Sikuwa\Whatsapp\Http\HttpRequest}.
      *
      * @param array<int,array{name:string, contents:string, filename?:string,
      *                        headers?:array<string,string>}> $parts
