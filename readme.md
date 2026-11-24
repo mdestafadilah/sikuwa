@@ -23,6 +23,7 @@ PHP 8.1+.
 | Wuzapi | Self-hosted | Go / WhatsMeow | <https://github.com/asternic/wuzapi> |
 | Wwebjs | Self-hosted | Node.js / whatsapp-web.js | <https://github.com/avoylenko/wwebjs-api> |
 | Waxum | Self-hosted | Rust / whatsapp-rust | <https://github.com/imtaqin/waxum> |
+| WPPConnect | Self-hosted | Node.js / WPPConnect | <https://github.com/wppconnect-team/wppconnect-server> |
 
 ## Instalasi
 
@@ -165,8 +166,9 @@ Tiap gateway menempuh jalur yang berbeda, dan itu memang sifat gateway-nya:
 | Wuzapi | `POST /chat/send/image` | `POST /chat/send/document` | JSON, data URI (wajib) |
 | Wwebjs | `POST /client/sendMessage/{id}` | sama, `contentType=MessageMedia` | JSON, base64 telanjang — atau `MessageMediaFromURL` bila sumbernya URL |
 | Waxum | `POST /api/v1/sessions/{id}/messages/image` | `…/messages/document` | JSON, `{data, mimetype}` — atau `{url}` bila sumbernya URL |
+| WPPConnect | `POST /api/{session}/send-file-base64` | sama | JSON, data URI (wajib) — atau URL, yang diunduh server |
 
-Enam hal yang mudah menjebak, dan sudah ditangani SDK:
+Tujuh hal yang mudah menjebak, dan sudah ditangani SDK:
 
 - **ApiMe dan Wuzapi hanya menerima isi berkasnya**, bukan URL — keduanya tidak
   mengunduh apa pun sendiri. Menyerahkan URL ke sana melempar
@@ -188,6 +190,13 @@ Enam hal yang mudah menjebak, dan sudah ditangani SDK:
   objek berkas: ia dititipkan di `options.caption`, sedangkan isinya di
   `content`. SDK yang menyusun keduanya, jadi satu berkas berteks pengantar
   tetap satu request.
+- **WPPConnect hanya menerima data URI, bukan base64 telanjang.** Server
+  memakai isinya langsung bila berawalan `data:`; selain itu ia menganggapnya
+  path berkas lokal atau URL yang harus diunduh, sehingga base64 telanjang
+  gagal sebagai "file not found". SDK membungkusnya menjadi data URI — dan
+  justru URL publik diterima, karena server yang mengunduhnya sendiri. Gambar
+  dan dokumen berbagi satu endpoint (`send-file-base64`); jenisnya dideteksi
+  server dari isi berkasnya, jadi `filename` yang menentukan tampilannya.
 
 #### Batas ukuran 16 MB
 
@@ -262,8 +271,9 @@ menolaknya lebih dulu dengan `ConfigurationException`.
 | Wuzapi | `POST /chat/presence` | `composing` + `Media: audio` \| `paused` | diabaikan |
 | Wwebjs | `POST /chat/sendStateTyping` · `…/sendStateRecording` · `…/clearState` | endpoint berbeda per keadaan | diabaikan; indikatornya bertahan ~25 detik di server |
 | Waxum | `POST /api/v1/sessions/{id}/chatstate/send` | `composing` \| `recording` \| `paused` | diabaikan |
+| WPPConnect | `POST /api/{session}/typing` · `…/recording` | `value: true` mengetik/merekam, `value: false` berhenti | diabaikan; statusnya bertahan sampai dihapus |
 
-Lima hal yang mudah menjebak, dan sudah ditangani SDK:
+Enam hal yang mudah menjebak, dan sudah ditangani SDK:
 
 - **Evolution API ikut menahan pemanggil.** Servernya yang mengirim
   `composing`, menunggu `delay`, lalu mengirim `paused` — jadi panggilan ini
@@ -283,6 +293,13 @@ Lima hal yang mudah menjebak, dan sudah ditangani SDK:
 - **Waxum memakai endpoint yang sama untuk semua keadaan**, dengan kolom
   `state` — kosakatanya kebetulan sama dengan kosakata baku SDK ini, jadi tidak
   ada penerjemahan kata yang perlu dilakukan.
+- **WPPConnect memakai dua endpoint dan satu boolean**, bukan nama keadaan:
+  `/typing` dengan `value: true|false` dan `/recording` dengan `value: true`.
+  `paused` dikirim lewat `/typing` karena di server ia memanggil
+  `stopTyping()` → `markIsPaused()`, dan status `paused` itulah yang menghapus
+  indikator apa pun yang sedang tampil — termasuk rekaman. `duration` tidak
+  ikut dikirim: servernya hanya menyimpan status, sedangkan lama tampilnya
+  dihabiskan SDK sendiri seperti gateway lain yang tidak memblokir.
 
 ### Jeda antar pesan (pacing)
 
@@ -340,7 +357,7 @@ sifat gateway-nya:
 | Fonnte | Server, lewat kolom `delay` tiap pesan |
 | OpenWA | Server, lewat `delayBetweenMessages` — satu angka untuk seluruh batch, diambil dari jeda sebelum pesan kedua |
 | Evolution API | Server, lewat kolom `delay` payload (dalam milidetik) |
-| ApiMe, Wuzapi, Wwebjs | SDK, dengan `sleep()` di antara request |
+| ApiMe, Wuzapi, Wwebjs, Waxum, WPPConnect | SDK, dengan `sleep()` di antara request |
 
 Karena jedanya dititipkan ke server, Fonnte, OpenWA, dan Evolution API tidak
 menahan klien dua kali. OpenWA juga menambahkan pengacakan di sisinya sendiri
@@ -467,7 +484,7 @@ gateway-nya:
 | Gateway | Yang terjadi |
 | --- | --- |
 | Evolution API | Servernya sudah menunggu dan menghapus indikatornya sendiri, jadi SDK **tidak** menunggu lagi — kalau tidak, pemanggil menunggu dua kali |
-| ApiMe, Wuzapi, OpenWA, Fonnte, Wwebjs, Waxum | Indikator hanya menyimpan status, jadi SDK yang menghabiskan durasinya |
+| ApiMe, Wuzapi, OpenWA, Fonnte, Wwebjs, Waxum, WPPConnect | Indikator hanya menyimpan status, jadi SDK yang menghabiskan durasinya |
 
 Tiga hal yang mudah menjebak, dan sudah ditangani SDK:
 
@@ -476,8 +493,8 @@ Tiga hal yang mudah menjebak, dan sudah ditangani SDK:
   hanya indikator untuk **tujuan pesan pertama**. Memunculkan untuk semua tujuan
   sekaligus justru membuat penerima terakhir melihat "sedang mengetik" lalu diam
   lama sebelum pesannya datang — lebih buruk daripada tanpa indikator. ApiMe,
-  Evolution API, wuzapi, Wwebjs, dan Waxum mengirim satu per satu, jadi tiap
-  pesan dapat indikatornya sendiri.
+  Evolution API, wuzapi, Wwebjs, Waxum, dan WPPConnect mengirim satu per satu,
+  jadi tiap pesan dapat indikatornya sendiri.
 - **Berkas tidak didahului indikator.** `sendImage()` dan `sendFile()` tidak
   melewati indikator "sedang mengetik" — yang dikirim bukan ketikan, dan
   mengatakannya akan berbohong. Pakai `sendTyping()` sendiri kalau memang mau.
@@ -598,8 +615,8 @@ $baru = $client->createSession(['name' => 'Notifikasi Sekolah']);
 echo $baru->id;
 ```
 
-Gateway menyebutnya berbeda-beda — OpenWA dan Wwebjs "session", ApiMe dan
-Evolution API "instance", wuzapi dan Fonnte "device" — tetapi semuanya
+Gateway menyebutnya berbeda-beda — OpenWA, Wwebjs, dan WPPConnect "session",
+ApiMe dan Evolution API "instance", wuzapi dan Fonnte "device" — tetapi semuanya
 mengembalikan `Sikuwa\Whatsapp\Session` yang sama:
 
 | Properti | Isi |
@@ -664,6 +681,7 @@ bukan sebagai exception:
 | OpenWA | HTTP 400 — sebabnya bercampur dengan sesi yang belum `qr_ready`, jadi tetap dilempar |
 | Wwebjs | JSON `qr code not ready or already scanned` — dibedakan dengan membaca status sesi |
 | Waxum | `{"qr_codes":[],"status":"logged_in"}` — dibedakan dari isi `qr_codes` dan status sesinya |
+| WPPConnect | JSON `{"status":"CONNECTED","message":"QRCode is not available..."}` — bukan PNG |
 
 Karena itu `showQr()` aman dipanggil tanpa memeriksa `checkSession()` lebih
 dulu:
@@ -703,6 +721,14 @@ dipakai, jadi satu token adalah satu sesi. Di sana `listSessions()` melempar
 `ConfigurationException` yang menjelaskan hal itu, bukan mengembalikan array
 kosong yang seolah-olah gateway tidak punya sesi.
 
+**WPPConnect juga tidak**, meski ia mengenal banyak sesi sekaligus. Satu-satunya
+endpoint daftarnya — `POST /api/show-all-sessions` — menuntut `SECRET_KEY` server
+di header `x-secret-key`, kredensial yang berbeda dari token Bearer per sesi
+yang dipegang SDK; balasannya pun hanya daftar token, tanpa keadaan sambungan.
+`listSessions()` di sana melempar `ConfigurationException` yang menyebut hal itu,
+dan jalan yang disarankan adalah menyimpan id sesinya di
+`WHATSAPP_SESSIONS_WPPConnect` lalu memanggil `checkSession($id)` per sesi.
+
 **Wwebjs hanya mengembalikan nama session**: endpoint-nya tidak menyertakan
 keadaan sambungan. Setiap `Session` hanya terisi `$id` dan `$provider`; status
 dan `connected` dibiarkan kosong. Panggil `checkSession($id)` per session untuk
@@ -717,6 +743,7 @@ mengetahui keadaannya.
 | Wuzapi | — | Tidak didukung (token = sesi) |
 | Wwebjs | `GET /session/getSessions` | Hanya nama session, tanpa keadaan |
 | Waxum | `GET /api/v1/sessions` | Setiap entri sudah membawa status runtime |
+| WPPConnect | — | Tidak didukung (daftar menuntut `SECRET_KEY` server di `x-secret-key`) |
 
 Catatan per gateway:
 
@@ -746,6 +773,17 @@ Catatan per gateway:
   gambar — memasangnya sebagai data URI PNG akan menghasilkan `<img>` yang
   rusak. Bentuk mentahnya tetap bisa dibaca lewat `$session->raw`. Sesi yang
   runtime-nya belum hidup ditolak HTTP 503, dan itu tetap dilempar.
+- **WPPConnect** — `GET /api/{session}/qrcode-session` mengirim **PNG biner**
+  selama QR-nya ada, dan baru menjawab JSON saat QR-nya tidak ada; SDK yang
+  membungkus PNG-nya menjadi data URI. Dua bentuk JSON-nya berbeda arti:
+  `{"status":"CONNECTED"}` berarti sudah tersambung (dilaporkan sebagai sesi
+  `connected` tanpa QR), sedangkan `{"status":null,"message":"Session not
+  started…"}` berarti `createSession()` belum dipanggil — yang terakhir
+  **dilempar**, karena memanggil ulang `showQr()` tidak akan pernah
+  menghasilkan QR. Status lain (mis. `INITIALIZING`) juga dilempar dengan pesan
+  gateway-nya, karena QR-nya memang belum siap dan akan muncul sendiri beberapa
+  detik kemudian. `status-session` sebenarnya ikut membawa `qrcode` sebagai
+  data URI, jadi `checkSession()` pun mengisinya bila ada.
 
 | Gateway | Membuat sesi | Memeriksa sesi | QR sesi |
 | --- | --- | --- | --- |
@@ -756,13 +794,14 @@ Catatan per gateway:
 | Fonnte | `POST /add-device` — `name`, `device`, `autoread` | `POST /get-devices` | `POST /qr` |
 | Wwebjs | `POST /session/start/{id}` — `id`, `webhookUrl` | `GET /session/status/{id}` | `GET /session/qr/{id}/image` |
 | Waxum | `POST /api/v1/sessions` — `id`, `name`, `webhook`, `device` | `GET /api/v1/sessions/{id}/status` | `GET /api/v1/sessions/{id}/qr` |
+| WPPConnect | `POST /api/{session}/start-session` — `waitQrCode`, `webhook`, `proxy` | `GET /api/{session}/status-session` | `GET /api/{session}/qrcode-session` |
 
 Catatan:
 
 - **Sesi baru biasanya belum tersambung.** OpenWA membuatnya `INITIALIZING`,
   Evolution API `created`, Fonnte `created`, Wwebjs `starting`, Waxum
-  `connecting`. Ambil QR-nya dengan `showQr()`, lalu pantau dengan
-  `checkSession()`.
+  `connecting`, WPPConnect `CLOSED`. Ambil QR-nya dengan `showQr()`, lalu pantau
+  dengan `checkSession()`.
 - **wuzapi tidak mengenal id sesi** — token yang terpasang sudah menentukan
   sesinya, jadi `createSession()` di sana berarti *menyambungkan* sesi dan
   `checkSession($id)` mengabaikan argumennya. Yang menandakan sesi siap dipakai
@@ -796,6 +835,15 @@ Catatan:
   berbeda dari OpenWA: panggil `checkSession()` lebih dulu, dan
   `createSession()` hanya kalau sesinya memang belum ada. Id sesinya juga ikut
   menentukan nama direktori penyimpanan, jadi SDK tidak meng-encode-nya.
+- **Token WPPConnect berlaku untuk satu sesi saja.** Ia diterbitkan lewat
+  `POST /api/{session}/{secretkey}/generate-token` dan merupakan hash bcrypt
+  dari `session + SECRET_KEY`, jadi `WHATSAPP_SESSION` **wajib** sama dengan
+  sesi yang tokennya Anda pegang — `SECRET_KEY` server sendiri tidak bisa
+  dipakai sebagai Bearer token. Nama sesinya juga tidak boleh memuat `:`,
+  karena server membacanya sebagai `session:token` di URL dan token di header
+  lalu diabaikan; SDK menolak nama seperti itu lebih awal. Berbeda dari Waxum,
+  `start-session` untuk sesi yang sudah ada berarti menyambungkannya kembali,
+  bukan ditolak.
 
 ## Konfigurasi
 
@@ -853,20 +901,23 @@ Urutan pembacaannya: kunci per-provider → `url` yang diberikan eksplisit →
 Nilai default bila semuanya dikosongkan: OpenWA `https://openwa.whatsapp.com`,
 ApiMe `https://api-me.whatsapp.com`, Evolution API
 `https://evolution-api.whatsapp.com`, Wuzapi `https://wuzapi.whatsapp.com`,
-Wwebjs `https://wwebjs.whatsapp.com`, Waxum `https://waxum.whatsapp.com`.
-Fonnte punya endpoint tetap sendiri.
+Wwebjs `https://wwebjs.whatsapp.com`, Waxum `https://waxum.whatsapp.com`,
+WPPConnect `https://wppconnect.whatsapp.com`. Fonnte punya endpoint tetap
+sendiri.
 
 ### Session per gateway
 
 Alasan yang sama berlaku untuk session: satu `WHATSAPP_SESSION` bersama akan
-dipakai OpenWA, Wwebjs, dan Waxum sekaligus, sehingga tiga gateway tidak bisa
-memakai nama session yang berbeda — padahal ketiganya sering berjalan
-berdampingan dan **tidak boleh** berbagi session. Pakai kunci per-provider:
+dipakai OpenWA, Wwebjs, Waxum, dan WPPConnect sekaligus, sehingga gateway itu
+tidak bisa memakai nama session yang berbeda — padahal keempatnya sering
+berjalan berdampingan dan **tidak boleh** berbagi session. Pakai kunci
+per-provider:
 
 ```dotenv
 WHATSAPP_SESSION_OpenWA=notif-sekolah
 WHATSAPP_SESSION_Wwebjs=notif-wwebjs
 WHATSAPP_SESSION_Waxum=notif-waxum
+WHATSAPP_SESSION_WPPConnect=notif-wpp
 WHATSAPP_INSTANCE_ApiMe=8f1c…
 WHATSAPP_INSTANCE_EvolutionAPI=sikuwa
 ```
@@ -875,7 +926,7 @@ Urutan pembacaannya sama seperti token dan URL: kunci per-provider → nilai
 `session`/`instance` yang diberikan eksplisit → `WHATSAPP_SESSION` /
 `WHATSAPP_INSTANCE`. Kunci per-provider sengaja **tidak** jatuh ke kunci bersama.
 Tiap gateway membaca kuncinya sendiri, jadi `WHATSAPP_SESSION_OpenWA` tidak akan
-pernah terpakai oleh Wwebjs atau Waxum.
+pernah terpakai oleh Wwebjs, Waxum, atau WPPConnect.
 
 Nama provider ditulis apa adanya mengikuti kunci per-provider yang sudah ada
 (`WHATSAPP_SESSION_OpenWA`), bukan diubah menjadi huruf besar.
@@ -960,12 +1011,22 @@ sudah dikonfigurasi tetapi belum dibuat di server, atau sebaliknya.
   jadi periksa dulu dengan `checkSession()`.
   Seluruh error-nya berbentuk `{"success":false,"error":{"code":N,"message":"…"}}`,
   dengan HTTP 503 untuk sesi yang belum tersambung.
+- **WPPConnect** — butuh `WHATSAPP_SESSION` (atau `WHATSAPP_SESSION_WPPConnect`),
+  dan endpointnya di bawah `/api/{session}`. Auth memakai
+  `Authorization: Bearer` berisi **token per sesi** dari
+  `POST /api/{session}/{secretkey}/generate-token` — bukan `SECRET_KEY` server,
+  yang hanya dipakai endpoint admin lewat `x-secret-key`. Pengiriman menuntut
+  sesi yang sudah `CONNECTED`; selama belum, middleware-nya membalas HTTP 404
+  `{"status":"Disconnected"}` berbahasa Portugis, dan SDK menerjemahkannya
+  menjadi petunjuk yang jelas. Tidak ada endpoint batch: pesan massal dikirim
+  satu per satu, dan `listSessions()` tidak didukung (lihat [Daftar
+  sesi](#daftar-sesi)).
 
 ## Memeriksa nomor (`checkNumbers()`)
 
 WhatsApp tidak memberi tahu apakah sebuah nomor bisa dihubungi sebelum pesannya
 benar-benar dikirim, jadi satu-satunya cara mengetahuinya adalah bertanya lebih
-dulu. `checkNumbers()` melakukan itu, dan hasilnya sama di tujuh gateway:
+dulu. `checkNumbers()` melakukan itu, dan hasilnya sama di delapan gateway:
 
 ```php
 $hasil = $client->checkNumbers(['081234567890', '089876543210']);
@@ -1004,11 +1065,16 @@ tidak terlihat dari sisi pemanggil:
 | Wuzapi | `POST /user/check` | seluruh daftar |
 | Wwebjs | `POST /client/isRegisteredUser/{sessionId}` | satu nomor |
 | Waxum | `POST /api/v1/sessions/{id}/contacts/check` | seluruh daftar |
+| WPPConnect | `GET /api/{session}/check-number-status/{phone}` | satu nomor |
 
-Tiga catatan pemakaian:
+Empat catatan pemakaian:
 
 - **OpenWA menuntut API key berperan operator** di endpoint ini; kunci baca biasa
   ditolak HTTP 403.
+- **WPPConnect membalas HTTP 502 saat pemeriksaannya sendiri gagal** — bukan
+  `numberExists: false`. Kegagalan itu dilaporkan sebagai error, karena
+  menjawab "tidak terdaftar" untuk sesuatu yang tidak sempat ditanyakan adalah
+  klaim palsu tentang nomor orang.
 - Memeriksa nomor adalah **traffic keluar tentang pihak ketiga**, sama seperti
   mengirim pesan. Menyapu daftar besar sekaligus berisiko bagi akun yang dipakai,
   jadi perlakukan seperti pengiriman: sedikit dulu, dan dengan jeda.
@@ -1064,9 +1130,9 @@ Empat perilaku yang disengaja:
   ikut disaring.
 
 Harganya adalah request tambahan sebelum pesan berangkat. Empat gateway
-memeriksa seluruh daftar dalam satu request, tetapi OpenWA, ApiMe, dan Wwebjs
-memeriksa **satu nomor per request** — daftar sepuluh nomor berarti sepuluh
-request pemeriksaan lebih dulu. Karena itu bawaannya **mati**.
+memeriksa seluruh daftar dalam satu request, tetapi OpenWA, ApiMe, Wwebjs, dan
+WPPConnect memeriksa **satu nomor per request** — daftar sepuluh nomor berarti
+sepuluh request pemeriksaan lebih dulu. Karena itu bawaannya **mati**.
 
 ## Menghindari diblokir WhatsApp
 
@@ -1152,12 +1218,12 @@ $client->send([
 ```
 
 Percobaan ulang dihitung **per request**, bukan per batch. Pada gateway yang
-mengirim satu pesan per request (ApiMe, Wuzapi, Wwebjs, Evolution API) itu berarti
-satu pesan yang ditolak diulang sendiri, dan pesan lain tidak ikut terulang.
-Begitu pula pada pemeriksaan nomor di gateway yang memeriksa satu nomor per
-request (OpenWA, ApiMe, Wwebjs): hanya nomor yang ditolak yang ditanyakan lagi,
-sehingga daftar panjang tidak kembali ke awal dan tidak menanyakan ulang nomor
-yang sudah dijawab.
+mengirim satu pesan per request (ApiMe, Wuzapi, Wwebjs, Waxum, WPPConnect,
+Evolution API) itu berarti satu pesan yang ditolak diulang sendiri, dan pesan
+lain tidak ikut terulang. Begitu pula pada pemeriksaan nomor di gateway yang
+memeriksa satu nomor per request (OpenWA, ApiMe, Wwebjs, WPPConnect): hanya
+nomor yang ditolak yang ditanyakan lagi, sehingga daftar panjang tidak kembali
+ke awal dan tidak menanyakan ulang nomor yang sudah dijawab.
 
 `Retry-After` diterima dalam dua bentuk — jumlah detik (`30`) maupun tanggal
 HTTP (`Wed, 21 Oct 2026 07:28:00 GMT`). Bentuk tanggal diubah menjadi selisih
@@ -1394,9 +1460,9 @@ Semua error melempar subclass dari `Sikuwa\Whatsapp\Exceptions\WhatsappException
 | `TimeoutException` | Request melewati `WHATSAPP_TIMEOUT` |
 
 Pengiriman massal ke gateway tanpa endpoint batch (ApiMe, Evolution API,
-wuzapi, Wwebjs) mengirim satu per satu. Kegagalan satu nomor tidak menghentikan
-sisanya; semuanya dikumpulkan lalu dilempar sebagai satu `ApiException`, jadi
-pemanggil melihat gambaran lengkapnya:
+wuzapi, Wwebjs, Waxum, WPPConnect) mengirim satu per satu. Kegagalan satu nomor
+tidak menghentikan sisanya; semuanya dikumpulkan lalu dilempar sebagai satu
+`ApiException`, jadi pemanggil melihat gambaran lengkapnya:
 
 ```
 2/3 pesan terkirim. Gagal: 62822: ApiMe menolak pesan (HTTP 400): nomor tidak terdaftar
@@ -1424,7 +1490,7 @@ yang sudah teruji.
 
 ## Feature
 
-- [x] Tujuh gateway: Fonnte, OpenWA, ApiMe, Evolution API, Wuzapi, Wwebjs, Waxum
+- [x] Delapan gateway: Fonnte, OpenWA, ApiMe, Evolution API, Wuzapi, Wwebjs, Waxum, WPPConnect
 - [x] Check Session
 - [x] Create sessions
 - [x] Show QR

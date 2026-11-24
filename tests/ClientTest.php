@@ -226,7 +226,7 @@ final class ClientTest extends TestCase
     public function testProvidersMapExposesEveryGateway(): void
     {
         self::assertSame(
-            ['Fonnte', 'OpenWA', 'ApiMe', 'EvolutionAPI', 'Wuzapi', 'Wwebjs', 'Waxum'],
+            ['Fonnte', 'OpenWA', 'ApiMe', 'EvolutionAPI', 'Wuzapi', 'Wwebjs', 'Waxum', 'WPPConnect'],
             array_keys(Client::providers())
         );
     }

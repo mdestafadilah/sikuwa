@@ -288,6 +288,13 @@ interface Whatsapp
      * menjelaskan hal itu — bukan mengembalikan array kosong yang
      * seolah-olah gateway tidak punya sesi sama sekali.
      *
+     * **WPPConnect juga tidak bisa**, walaupun ia mengenal banyak sesi:
+     * endpoint daftarnya (`POST /api/show-all-sessions`) menuntut `SECRET_KEY`
+     * server di header `x-secret-key`, kredensial yang berbeda dari token
+     * per-sesi yang dipegang SDK. Method ini melempar
+     * {@see Exceptions\ConfigurationException} dengan penjelasan yang sama
+     * terangnya.
+     *
      * **Wwebjs hanya mengembalikan nama sesi** — endpoint-nya tidak
      * menyertakan keadaan sambungan. Setiap `Session` hanya terisi `$id`
      * dan `$provider`; `$status` dan `$connected` dibiarkan kosong. Panggil

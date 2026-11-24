@@ -248,7 +248,7 @@ abstract class AbstractProvider implements Whatsapp
      * Semua yang bisa diseragamkan dikerjakan di sini — menerima satu nomor
      * atau daftar, membuang yang kosong, menghapus duplikat, dan menormalkan
      * tiap nomor ke bentuk internasional tanpa tanda plus. Provider hanya
-     * menerima daftar nomor yang sudah bersih, sehingga tidak ada dari tujuh
+     * menerima daftar nomor yang sudah bersih, sehingga tidak ada satu pun
      * gateway yang perlu mengulang aturan yang sama.
      *
      * Deduplikasi bukan sekadar kerapian: memeriksa nomor yang sama dua kali
@@ -351,7 +351,7 @@ abstract class AbstractProvider implements Whatsapp
         // terunggah penuh dulu, baru ditolak WhatsApp dengan pesan yang tidak
         // menjelaskan apa-apa — dan pemanggil menunggu lama untuk kegagalan
         // yang bisa diketahui sejak awal. Batasnya milik WhatsApp, bukan
-        // gateway, jadi tempatnya di sini sekali, bukan di tujuh provider.
+        // gateway, jadi tempatnya di sini sekali, bukan di setiap provider.
         if ($file->exceedsLimit()) {
             throw new ConfigurationException(
                 "Berkas '{$file->filename}' berukuran {$file->readableSize()}, "

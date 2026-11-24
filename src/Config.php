@@ -405,8 +405,8 @@ final class Config
      *
      * Sama seperti {@see providerToken()} dan {@see providerUrl()}: kunci ini
      * tidak pernah jatuh ke `WHATSAPP_SESSION`. Inilah yang membuat OpenWA,
-     * Wwebjs, dan Waxum bisa dikonfigurasi bersamaan — masing-masing bisa
-     * memakai nama sesinya sendiri.
+     * Wwebjs, Waxum, dan WPPConnect bisa dikonfigurasi bersamaan —
+     * masing-masing bisa memakai nama sesinya sendiri.
      *
      * Nama provider ditulis apa adanya (`WHATSAPP_SESSION_OpenWA`), mengikuti
      * kunci per-provider yang sudah ada, bukan diubah menjadi huruf besar.
@@ -554,9 +554,10 @@ final class Config
      * elemen pertama dari kunci jamak, lalu nilai eksplisit, lalu
      * `WHATSAPP_SESSION`.
      *
-     * Dipakai OpenWA, Wwebjs, dan Waxum. Provider yang tidak memakai session
-     * (Fonnte, ApiMe, Evolution API, wuzapi) tetap bisa memanggil ini tanpa
-     * akibat apa pun — nilainya memang tidak dipakai di sana.
+     * Dipakai OpenWA, Wwebjs, Waxum, dan WPPConnect. Provider yang tidak
+     * memakai session (Fonnte, ApiMe, Evolution API, wuzapi) tetap bisa
+     * memanggil ini tanpa akibat apa pun — nilainya memang tidak dipakai di
+     * sana.
      */
     public function session(?string $provider = null): string
     {

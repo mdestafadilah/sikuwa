@@ -34,7 +34,7 @@ final class File
      *
      * Angka ini milik WhatsApp, bukan milik gateway — Fonnte, OpenWA, dan
      * lainnya hanya meneruskan. Karena itu batasnya dipasang di sini sekali,
-     * bukan di tujuh provider: berkas yang ditolak WhatsApp akan ditolak sama
+     * bukan di setiap provider: berkas yang ditolak WhatsApp akan ditolak sama
      * di gateway mana pun.
      *
      * Sengaja dipakai sebagai peringatan dini, bukan larangan: WhatsApp bisa
